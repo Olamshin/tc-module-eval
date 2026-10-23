@@ -1,14 +1,16 @@
 # F001–F007 evaluator design
 
-Status: design proposal, version 2, awaiting the user's review; not implemented. Q1–Q9 were
+Status: design proposal, version 3, awaiting the user's review; not implemented. Q1–Q9 were
 decided on 2026-10-23 (see [Decisions](#decisions)). Based on `origin/master` at `53eed3a` (S012 #66
 and S014 #65 merged; S011 and S013 in progress elsewhere). All real-world numbers were collected on
 2026-10-23 and will drift.
 
+Changes in version 3: Q6 revised by the user. F002's agent review runs by default too, whenever
+F002 is manual, without being listed. With agent review enabled, F001, F002, F003 and F006 run
+when manual; F004 and F007 run only when runtime evidence was collected.
+
 Changes in version 2: Q1–Q9 recorded as decisions, all as recommended. A small PR fixing
-`classifyModuleKind` (Q7) now comes first in the implementation order. Q6 is made concrete: when
-agent review is enabled without `--criterion-agent-criteria`, F001, F003 and F006 run; F004 and
-F007 run only when runtime evidence was collected; F002 runs only when listed.
+`classifyModuleKind` (Q7) now comes first in the implementation order.
 
 The Frontend criteria from the [master list](https://gist.github.com/okolawole-ebsco/f54f7617b61680f2ad346896e807a796)
 apply to UI modules and shared UI libraries alike. `src/evaluators/javascript/frontend-evaluator.ts`
@@ -250,19 +252,18 @@ Agent review runs only when the deterministic status is `manual`, as today. It u
 
 Which F criteria run (decided, Q6). Today, enabling agent review without
 `--criterion-agent-criteria` lets every agent-capable criterion run, and listing criteria narrows
-that. The F criteria add two conditions on top:
+that. The F criteria keep that behaviour and add one condition, for F004 and F007:
 
-| Criterion | Agent review enabled, no criteria list | Listed in `--criterion-agent-criteria` |
-| --- | --- | --- |
-| F001, F003, F006 | runs | runs |
-| F004, F007 | runs only with runtime evidence | runs only with runtime evidence |
-| F002 | does not run | runs |
-| F005 | no agent review | no agent review |
+| Criterion | Agent review enabled (when manual) |
+| --- | --- |
+| F001, F002, F003, F006 | runs |
+| F004, F007 | runs only when runtime evidence was collected |
+| F005 | no agent review |
 
-When a condition stops a review, the report gives the reason in the existing note, for example
-"Agent review: Not run: F004 agent review needs runtime evidence (--ui-runtime-url)" or "Not run:
-F002 agent review runs only when listed in --criterion-agent-criteria". Layers 1 and 2 are shown
-as usual.
+A `--criterion-agent-criteria` list still narrows this as it does today, but it cannot make F004
+or F007 run without runtime evidence. When that condition stops a review, the report gives the
+reason in the existing note: "Agent review: Not run: F004 agent review needs runtime evidence
+(--ui-runtime-url)". Layers 1 and 2 are shown as usual.
 
 Starting material, under `.criterion-agent/<ID>/`:
 
@@ -324,9 +325,11 @@ Semantic validation (all-or-nothing, as today). The response is rejected when:
 - **Cost and time per review** (from F10): about $0.02–0.05 and 1–4 minutes with
   deepseek-v4-flash. A full UI evaluation with all six agent-capable criteria is about
   $0.10–0.30 and 8–20 minutes. With $4.95 of the $10 OpenRouter limit left, that is roughly
-  15–45 full UI evaluations. With the Q6 default (F001, F003 and F006; F004 and F007 only with
-  runtime evidence) a module costs about $0.06–0.15 and 3–12 minutes without runtime evidence,
-  roughly 30–80 modules on the remaining budget.
+  15–45 full UI evaluations. With the Q6 default (F001, F002, F003 and F006 when manual; F004 and
+  F007 only with runtime evidence) a UI module costs about $0.06–0.15 and 3–12 minutes without
+  runtime evidence, roughly 30–80 modules on the remaining budget. F002 is `not_applicable` for
+  the sampled ui-* modules, so it adds a review (about $0.02, usually short) only for repositories
+  with Karma/BigTest or similar browser tests, such as stripes-components.
 - A rejected response is reported as unavailable with the reason; the evaluator does not retry.
 
 ### Optional runtime UI evidence (F004, F006, F007)
@@ -448,8 +451,8 @@ and workflow steps that run them (from the S012 build-test evidence). Policy: th
 
 ### Agent review
 
-Only in the manual case, and only when F002 is listed in `--criterion-agent-criteria` (Q6).
-Asked to classify each suite as E2E or component test and to say which
+Runs by default whenever F002 is manual (Q6); it does not need to be listed. Asked to classify
+each suite as E2E or component test and to say which
 runner CI uses. Obligations `F002-C1:<suite path>`, `F002-C2`. Usually short (stripes-components:
 Karma + BigTest).
 
@@ -665,8 +668,9 @@ Stable): no console errors, 1 failed request …`.
 - Agent review through the existing fake adapter: one accepted response per criterion, plus
   rejections for each validation rule (missing obligation, uncited assessment,
   `likely_sufficient` with an `evidence_gap`, runtime `aligned_fact` without runtime evidence).
-- Agent selection (Q6): with agent review enabled and no criteria list, F001 runs, F002 does not,
-  and F004 without runtime evidence does not; each skip shows its reason.
+- Agent selection (Q6): with agent review enabled and no criteria list, F001 and a manual F002
+  run, F004 without runtime evidence does not and shows its reason, and listing F004 does not
+  change that.
 - Report tests: the three layers appear with review disabled, accepted and rejected; checklist
   items not covered by the agent are labelled.
 - Runtime probe: a loopback HTML page with known axe violations and a console error; no network.
@@ -731,9 +735,9 @@ the defaults for Q2, Q4, Q8 and Q9 stand.
 - **Q4. Message ids missing from `en.json` make F003 manual**, with the list; they do not fail it.
 - **Q5. The optional runtime probe is built** in the F004 PR (`--ui-runtime-url` plus
   credentials), as agent input only.
-- **Q6. Agent review by default for F001, F003 and F006**; for F004 and F007 only when runtime
-  evidence was collected; F002 only when listed in `--criterion-agent-criteria`. See "Which F
-  criteria run".
+- **Q6. Agent review by default for F001, F002, F003 and F006** whenever they are manual; for
+  F004 and F007 only when runtime evidence was collected. F002 does not need to be listed
+  (revised in version 3). See "Which F criteria run".
 - **Q7. `classifyModuleKind` is fixed first**, as its own small PR (PR 0).
 - **Q8. Stripes constituent libraries are manual for F005**, with checklist item F005-C2.
 - **Q9. The evaluator vendors a pinned snapshot of the stripes-components UX guidelines**, about
