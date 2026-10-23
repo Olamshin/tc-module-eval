@@ -1,6 +1,6 @@
 # B001–B016 evaluator design
 
-Status: design proposal, version 3. Q1–Q17 are decided (see [Decisions](#decisions)); the oracle
+Status: design proposal, version 3.1. Q1–Q17 are decided (see [Decisions](#decisions)); the oracle
 review is folded in (see [Review changes](#review-changes)). Not implemented. Based on
 `origin/master` at `0069e91`: S011, S012, S013 and S014 merged; PR 0 `classifyModuleKind` merged
 as #69; F001–F007 approved but not yet implemented. All real-world numbers were collected on
@@ -18,7 +18,7 @@ each PR replaces its entry.
 | B001 | Compliant Module Descriptor in the repository | Find the committed descriptor template, substitute build placeholders, validate against the Okapi schema S002 already uses | None | Fail when a backend or edge module's template is invalid; manual when no template is found (the repository is then `ambiguous`); pass when it validates. |
 | B002 | Consumed APIs declared in `requires` / `optional` | Extract outbound request paths, map them to interfaces with the F001 handler index, compare with the committed template's declarations | Unresolved calls; whether a candidate call is reachable | Pass when every resolved call is declared; manual otherwise (Q3); not applicable to libraries. |
 | B003 | Executable implementations of every `provides` endpoint | Spec method and path plus an implementing class found by a pinned naming rule (RMB/Spring), router literals (Vert.x, edge), Grails URL mappings | Handlers the inventory cannot match | Pass when every handler matches; fail only when the spec lacks a handler and no route literal serves it; manual otherwise. |
-| B004 | Environment variables follow the FOLIO policy (5 sub-checks) | ENV_VARS.md or README table (the only documentation, Q2) with default, required/optional and description for every used variable; required/default consistency; names and prefixes; fail-fast evidence | Startup behaviour and startup logging; undocumented-variable candidates | Fail on an undocumented variable, a table missing a required column, a defaulted variable marked required, or a malformed name (Q1, Q2, Q8, Q12); pass only with fail-fast evidence and no logging signals; manual otherwise. |
+| B004 | Environment variables follow the FOLIO policy (5 sub-checks) | ENV_VARS.md or README table (the only documentation, Q2) with default, required/optional and description for every used variable; required/default consistency; names and prefixes; fail-fast evidence | Startup behaviour and startup logging; undocumented-variable candidates | Fail on an undocumented variable, a table missing a required column, a template without a top-level `env`, a defaulted variable marked required, or a malformed name (Q1, Q2, Q8, Q12); pass only with fail-fast evidence and no logging signals; manual otherwise. |
 | B005 | Interfaces in `provides` follow naming conventions | Interface ids and versions in `provides` (placeholders resolved from build properties); implemented routes not provided | None | Fail on an id with dots or underscores or a version that is not major.minor; manual on uppercase ids, unresolved placeholders, implemented-but-not-provided routes. |
 | B006 | All API endpoints documented in OpenAPI (RMB may keep RAML for existing modules) | Find OpenAPI/RAML specs, resolve `$ref`s, match every handler path and method | None | Pass when every handler is documented in OpenAPI (or RAML for an existing RMB module, Q1); fail on undocumented handlers or no spec; manual when references cannot be resolved. |
 | B007 | Endpoints protected with appropriate permissions | `permissionsRequired` on every handler, `*.all` use, permission names, definitions in `permissionSets` | Whether permissions fit the endpoints and module permissions are complete | Fail on a handler that requires a `*.all` permission or an undefined permission; manual otherwise (Q7). |
@@ -114,7 +114,8 @@ The [Environment Variables policy](https://folio-org.atlassian.net/wiki/x/NYCgTg
 for every variable in the descriptor's top-level `env` with name, default (`value`, may be empty),
 `required` and `description`, and an `ENV_VARS.md` or README table. Decision Q2 (B): only
 `ENV_VARS.md` or a README table counts as documentation for B004; descriptor env lists are inputs,
-not documentation.
+not documentation. The template must still have a top-level `env` (section 3.1); none of the eight
+does.
 
 | Module | Variables (`launchDescriptor.env`) | Top-level `env` | `ENV_VARS.md` | In a README table | README table columns | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -574,7 +575,7 @@ Five sub-checks, each a checklist group.
 
 | Sub-check | Deterministic part | Fails when (new-module mode) |
 | --- | --- | --- |
-| C1 Documented with required fields | Every variable the module uses appears in `ENV_VARS.md` or a README table (Q2, Q12), and the table gives a default (may be empty), required or optional, and a description for it. "Uses" means named in either descriptor env list, read in code (`System.getenv`, `@Value`), or a `${NAME:…}` placeholder in the module's own `application*.yml` | no `ENV_VARS.md` or README table naming the variables (4 of 8 sampled modules), a used variable missing from it (mod-search: 7 of 75), or a table without a default, required/optional or description column (all 4 modules with tables lack required/optional) |
+| C1 Documented with required fields | Every variable the module uses appears in `ENV_VARS.md` or a README table (Q2, Q12), and the table gives a default (may be empty), required or optional, and a description for it. "Uses" means named in either descriptor env list, read in code (`System.getenv`, `@Value`), or a `${NAME:…}` placeholder in the module's own `application*.yml` | no `ENV_VARS.md` or README table naming the variables (4 of 8 sampled modules), a used variable missing from it (mod-search: 7 of 75), or a table without a default, required/optional or description column (all 4 modules with tables lack required/optional), or a descriptor template with no top-level `env` (missing or empty; all 8 sampled modules) |
 | C2 Required vs optional | Required/optional from the documentation; defaults from the documentation, a top-level `env[].value`, or a code default | a variable documented as required has a non-empty default |
 | C3 Naming | `^[A-Z0-9_]+$`; category prefixes `DB_`, `KAFKA_`, `S3_` (not `AWS_`), `ELASTICSEARCH_`, `SYSTEM_USER_`, `*_ENABLED` | a name breaks the format, or uses `AWS_` without an `S3_` equivalent (also in existing-module mode, section 5.1) |
 | C4 Startup behaviour | Fail-fast evidence for required variables from the B004 collector (the same "clear fail-fast" patterns S010 uses, applied to every name) | never by itself |
@@ -587,8 +588,21 @@ do not count. Columns are recognised by header words: default (`Default`, `Defau
 required or optional (`Required`, `Optional`, `Mandatory`), and description (`Description`).
 
 Neither descriptor env list counts as documentation. `launchDescriptor.env` and top-level `env`
-are only inputs that say which variables the module uses. B004 does not require a top-level `env`,
-although the policy also asks for one; the report says so in one line.
+are only inputs that say which variables the module uses.
+
+Top-level `env` (policy section 3.1, confirmed by the user): C1 also fails when the descriptor
+template has no top-level `env`, meaning the key is missing or its array is empty. This is a
+presence check only. The entries' fields are not checked, because the documentation that counts
+is `ENV_VARS.md` or the README table. Like the other C1 gaps, it is manual in `--existing-module`
+mode. Where there is no template, the condition does not apply:
+- **Backend modules** always have a template, because `classifyModuleKind` returns
+  `backend-module` only when it finds one.
+- **Libraries** get only C3–C5 (names, startup behaviour, logging; see Applicability), so C1,
+  including this condition, is not evaluated (folio-spring-base).
+- **Ambiguous repositories** (no template) are treated as libraries for B004. The missing
+  descriptor is reported once, by B001 (manual).
+- **Edge modules without a template** fail B001. B004 skips this condition with the note "no
+  descriptor template; see B001", so one missing file is not counted twice.
 
 Only a top-level `env[].value` counts as a default. A `launchDescriptor.env[].value` is a deployment
 value (mod-users sets `KAFKA_HOST` to `10.0.2.15` and `DB_PASSWORD` to `folio_admin`), not a
@@ -613,7 +627,7 @@ B004 fail: The module uses 18 environment variables, but none is documented in E
 README table. 5 S3 variables use the AWS_ prefix instead of S3_.
   - C1 Documentation: no ENV_VARS.md; README.md has no table naming the variables. The 18 names
     come from launchDescriptor.env in descriptors/ModuleDescriptor-template.json, which does not
-    count as documentation.
+    count as documentation. The template has no top-level "env" (policy section 3.1).
   - C2 Required vs optional: cannot be checked without documentation
   - C3 Naming: AWS_URL, AWS_REGION, AWS_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (policy: S3_ prefix; existing modules add S3_ names alongside); AWS_SDK is a flag, not a credential
   - C4 Startup behaviour: no fail-fast evidence found
@@ -946,6 +960,10 @@ that catch plausible mistakes:
   - variables only in `launchDescriptor.env` and top-level `env`, with no ENV_VARS.md or README
     table (fail: descriptors are not documentation);
   - a README table that names every variable but has no required/optional column (fail);
+  - a complete ENV_VARS.md with a template that has no top-level `env`, and with `"env": []`
+    (fail; manual in existing-module mode);
+  - a library and an ambiguous repository without a template (the top-level `env` condition is
+    not evaluated);
   - the same variables in a bullet list (fail: only tables count);
   - an ENV_VARS.md table with every column (C1 clean);
   - a variable documented as required with a default in the table or a top-level `env.value`
@@ -1048,7 +1066,7 @@ The user answered every question on 2026-10-23. All answers are the recommendati
 | | Question | Decision |
 | --- | --- | --- |
 | Q1 | Add an `--existing-module` evaluation flag? | **A.** Yes, default new-module. It relaxes B004 C1 and B005 naming, and allows RAML in B006 for RMB modules. |
-| Q2 | Does `launchDescriptor.env` count as documentation? | **B.** No. Only `ENV_VARS.md` or a README table counts. Descriptor env lists (`launchDescriptor.env` and top-level `env`) are inputs that say which variables exist, not documentation. |
+| Q2 | Does `launchDescriptor.env` count as documentation? | **B.** No. Only `ENV_VARS.md` or a README table counts. Descriptor env lists (`launchDescriptor.env` and top-level `env`) are inputs that say which variables exist, not documentation. Confirmed afterwards: the template must still have a top-level `env` (policy section 3.1), or C1 fails. |
 | Q3 | Does an undeclared consumed interface fail B002? | **A.** No, manual. The only candidate in eight modules is dead code. |
 | Q4 | Is the applicability table right for edge modules and libraries? | **A.** As proposed, including the ambiguous column. |
 | Q5 | Build the Docker runtime harness? | **A.** Yes, as the last PR, behind `--allow-runtime-checks`; it decides only B014. |
@@ -1065,10 +1083,9 @@ The user answered every question on 2026-10-23. All answers are the recommendati
 | Q16 | Does a `--criterion-agent-criteria` list add to the defaults or replace them? | **A.** Replace, as today. |
 | Q17 | Do cross-module Kafka topics count as B012 dependencies? | **A.** Yes, as a checklist and agent item only; never a fail. |
 
-**Reading of Q2 (B).** The question offered "top-level `env` only" as option B. The answer says
-only `ENV_VARS.md` or a README table counts, so version 3 treats neither descriptor env list as
-documentation, and does not require a top-level `env`. If a top-level `env` should also be
-required, as policy section 3.1 asks, C1 gains one more fail condition.
+**Q2 (B) and the top-level `env`.** Version 3 read Q2 (B) as not requiring a top-level `env`. The
+user then confirmed that policy section 3.1 applies: version 3.1 adds a C1 fail condition for a
+template with no top-level `env`. `ENV_VARS.md` or a README table is still the only documentation.
 
 ## Risks
 
@@ -1091,6 +1108,21 @@ required, as policy section 3.1 asks, C1 gains one more fail condition.
 - Non-Java backends. Every B entry has `languages: ['java']`, so Go (on the OST list) and Node
   backends never reach `BackendEvaluator`. Supporting them means new catalog languages and
   evaluators.
+
+## Version 3.1 changes
+
+- **B004 C1 fails when the descriptor template has no top-level `env`** (missing or empty), as
+  policy section 3.1 asks and the user confirmed. It is a presence check only: the
+  documentation that counts is still `ENV_VARS.md` or a README table. It is manual in
+  `--existing-module` mode.
+- **Repositories without a template:**
+  - libraries (C1 not evaluated);
+  - ambiguous repositories (treated as libraries for B004; B001 reports the missing descriptor);
+  - edge modules without a template (B001 fails; B004 notes it and does not count it again).
+- **Expected results: no change.** All eight sampled modules have no top-level `env`, so each
+  gains this condition, but each already failed C1, so B004 stays fail in new-module mode. In
+  existing-module mode it is manual like the other C1 gaps, so B004 stays manual except for
+  mod-users, which still fails C3. folio-spring-base is a library, so its B004 stays manual.
 
 ## Version 3 changes
 
