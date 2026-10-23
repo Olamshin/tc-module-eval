@@ -1,10 +1,10 @@
 # B001–B016 evaluator design
 
-Status: design proposal, version 2 (oracle review folded in; see [Review changes](#review-changes)),
-awaiting the user's review; not implemented. Based on
-`origin/master` at `a91d8cf` (S011, S012 and S014 merged; S013 and PR 0 `classifyModuleKind` on
-unmerged branches; F001–F007 approved but not yet implemented). All real-world numbers were
-collected on 2026-10-23 and will drift.
+Status: design proposal, version 3. Q1–Q17 are decided (see [Decisions](#decisions)); the oracle
+review is folded in (see [Review changes](#review-changes)). Not implemented. Based on
+`origin/master` at `0069e91`: S011, S012, S013 and S014 merged; PR 0 `classifyModuleKind` merged
+as #69; F001–F007 approved but not yet implemented. All real-world numbers were collected on
+2026-10-23 and will drift.
 
 The Backend criteria from the [master list](https://gist.github.com/okolawole-ebsco/f54f7617b61680f2ad346896e807a796)
 "apply to modules, shared backend libraries, and edge modules". `src/evaluators/java/backend-evaluator.ts`
@@ -18,7 +18,7 @@ each PR replaces its entry.
 | B001 | Compliant Module Descriptor in the repository | Find the committed descriptor template, substitute build placeholders, validate against the Okapi schema S002 already uses | None | Fail when a backend or edge module's template is invalid; manual when no template is found (the repository is then `ambiguous`); pass when it validates. |
 | B002 | Consumed APIs declared in `requires` / `optional` | Extract outbound request paths, map them to interfaces with the F001 handler index, compare with the committed template's declarations | Unresolved calls; whether a candidate call is reachable | Pass when every resolved call is declared; manual otherwise (Q3); not applicable to libraries. |
 | B003 | Executable implementations of every `provides` endpoint | Spec method and path plus an implementing class found by a pinned naming rule (RMB/Spring), router literals (Vert.x, edge), Grails URL mappings | Handlers the inventory cannot match | Pass when every handler matches; fail only when the spec lacks a handler and no route literal serves it; manual otherwise. |
-| B004 | Environment variables follow the FOLIO policy (5 sub-checks) | Descriptor fields, ENV_VARS.md or README table, required/default consistency, names and prefixes, fail-fast evidence, variables read but undocumented | Startup behaviour and startup logging; undocumented-variable candidates | Fail on missing required fields or second-location documentation, a defaulted variable marked required, or a malformed name (Q1, Q8, Q12); pass only with fail-fast evidence and no logging signals; manual otherwise. |
+| B004 | Environment variables follow the FOLIO policy (5 sub-checks) | ENV_VARS.md or README table (the only documentation, Q2) with default, required/optional and description for every used variable; required/default consistency; names and prefixes; fail-fast evidence | Startup behaviour and startup logging; undocumented-variable candidates | Fail on an undocumented variable, a table missing a required column, a defaulted variable marked required, or a malformed name (Q1, Q2, Q8, Q12); pass only with fail-fast evidence and no logging signals; manual otherwise. |
 | B005 | Interfaces in `provides` follow naming conventions | Interface ids and versions in `provides` (placeholders resolved from build properties); implemented routes not provided | None | Fail on an id with dots or underscores or a version that is not major.minor; manual on uppercase ids, unresolved placeholders, implemented-but-not-provided routes. |
 | B006 | All API endpoints documented in OpenAPI (RMB may keep RAML for existing modules) | Find OpenAPI/RAML specs, resolve `$ref`s, match every handler path and method | None | Pass when every handler is documented in OpenAPI (or RAML for an existing RMB module, Q1); fail on undocumented handlers or no spec; manual when references cannot be resolved. |
 | B007 | Endpoints protected with appropriate permissions | `permissionsRequired` on every handler, `*.all` use, permission names, definitions in `permissionSets` | Whether permissions fit the endpoints and module permissions are complete | Fail on a handler that requires a `*.all` permission or an undefined permission; manual otherwise (Q7). |
@@ -44,7 +44,7 @@ each PR replaces its entry.
   `EnvEntry.required` field.
 - **S008** (`s008-interface-declarations.ts`) reads backend `requires` / `optional` with `fs` from
   the working tree, preferring S002's generated descriptor when local commands ran
-  (lines 29–31), and rejects placeholder ids and versions. Its `collectBackend` is private; the
+  (lines 30–32), and rejects placeholder ids and versions. Its `collectBackend` is private; the
   public entry point is `collectS008Declarations(repo, 'backend-module')`.
 - **S010** (`s010-evidence.ts`) is not reusable for B004 or B012 as it stands:
   - `collectEnvDeclarations` (line 491) is private;
@@ -57,28 +57,34 @@ each PR replaces its entry.
   name of any class using `WebClient|HttpClient|RestTemplate|KafkaTemplate|S3Client`, which are
   mostly Okapi interface clients.
 - **S003** (`license-compliance.ts`) has a private `isDocumentedInReadme(dependency, readme)` that
-  matches dependency names in README text with word boundaries (line 84).
+  matches dependency names in README text, case-insensitively, with lookarounds that act as word
+  boundaries (lines 74–83).
 - **S007/S012 policy sharing** (`s007-policy.ts`): the committed Trillium policy has these
   sections:
   - `infrastructure` (`consumer: "future"`): PostgreSQL 16, OpenSearch 3, Elasticsearch 8,
     Kafka 4.2 (normative), MinIO-compatible S3 (advisory, alias `s3`);
   - `fast-moving-infrastructure`: FOLIO Kong and Keycloak;
   - `backend-integration-testing` (`consumer: "s013"`): Karate and cucumber-reporting
-    (provisional).
+    (provisional). S013 on master reads it through `policySections(policy, 's013', area)`
+    (`s013-evaluator.ts:233`).
 
   The consumer enum in `officially-supported-technologies.schema.json` (line 148) and
   `s007-officially-supported-technologies.ts` (line 8) is `s007|s012|s013|future`.
 - **Remote lookups** (`remote-evidence.ts`, `--allow-remote-lookups`): `api.github.com` allows only
-  `/repos/folio-org/(platform-lsp|app-*)` (lines 46–52). A folio-integration-tests lookup needs a
+  `/repos/folio-org/(platform-lsp|app-*)` (lines 47–52). A folio-integration-tests lookup needs a
   transport change (B009 PR).
-- **Module kind** (`module-kind.ts`): `backend-module` only when a descriptor is found (lines 39–60);
-  otherwise `ambiguous`. The library allowlist (lines 6–15) does not include `edge-common` or
-  `edge-common-spring`.
-- **Agent review selection** (`criterion-agent-review.ts:84-88`): an empty `enabledCriteria` runs
-  every agent-capable criterion; a `--criterion-agent-criteria` list narrows the whole run,
-  S criteria included. The report's skip regex (`report-html-template.ts:140`) only knows `S\d+`.
-  S011 is agent-capable on master, so S-criteria reviews number up to six.
-- **Catalog languages:** every B entry has `languages: ['java']` (`criteria-definitions.ts:185-343`),
+- **Module kind** (`module-kind.ts`, after #69): `classifyModuleKind` checks for a
+  `ModuleDescriptor*.json` first (line 24, `hasBackendModuleMarker` at line 40) and returns
+  `backend-module` when it finds one. Only then does it check the library allowlist (lines 6–15)
+  and the Stripes `actsAs` marker, then UI markers, and otherwise returns `ambiguous`. The
+  allowlist does not include `edge-common` or `edge-common-spring`. A library that ships a
+  descriptor would be classified as a module; none of the sampled libraries does.
+- **Agent review selection** (`criterion-agent-review.ts:87-89`, and line 129 for the adapter):
+  an empty `enabledCriteria` runs every agent-capable criterion; a `--criterion-agent-criteria`
+  list narrows the whole run, S criteria included. The report's skip regex
+  (`report-html-template.ts:141`) only knows `S\d+`. S011 is agent-capable on master
+  (`AGENT_REVIEW_CRITERIA`, line 115), so S-criteria reviews number up to six.
+- **Catalog languages:** every B entry has `languages: ['java']` (`criteria-definitions.ts:178-331`),
   so only `JavaEvaluator` repositories reach `BackendEvaluator`.
 - **F001–F007 design (approved, version 5)** adds what this design reuses: the structured checklist
   and three-layer report (`criterionDetails.checklist`, an F/B branch in `reportDetailLines`), the
@@ -106,21 +112,25 @@ descriptor.
 
 The [Environment Variables policy](https://folio-org.atlassian.net/wiki/x/NYCgTg) (section 3) asks
 for every variable in the descriptor's top-level `env` with name, default (`value`, may be empty),
-`required` and `description`, and an `ENV_VARS.md` or README table.
+`required` and `description`, and an `ENV_VARS.md` or README table. Decision Q2 (B): only
+`ENV_VARS.md` or a README table counts as documentation for B004; descriptor env lists are inputs,
+not documentation.
 
-| Module | Variables (`launchDescriptor.env`) | Top-level `env` | With `required` | Without `description` | Notes |
-| --- | --- | --- | --- | --- | --- |
-| mod-search | 75 | 0 | 0 | 4 | 28 more names read in `application.yml` placeholders, e.g. `DELETE_QUERY_BATCH_SIZE` |
-| mod-notes | 20 | 0 | 0 | 12 | 11 more read in config, e.g. `DB_CONNECTION_TIMEOUT` (pool settings) |
-| mod-users | 18 | 0 | 0 | 18 | S3 variables use `AWS_*`; the policy says `S3_` |
-| mod-circulation-storage | 13 | 0 | 0 | 13 | |
-| mod-circulation | 12 | 0 | 0 | 12 | |
-| mod-agreements | 7 | 0 | 0 | 7 | Groovy `${CONST}` strings look like variables (false positives) |
-| edge-patron | 3 | 0 | 0 | 3 | Secure-store settings are Java system properties (`secure_store`) |
-| mod-inventory-storage | 49 | 0 | 0 | 49 | |
+| Module | Variables (`launchDescriptor.env`) | Top-level `env` | `ENV_VARS.md` | In a README table | README table columns | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| mod-search | 75 | 0 | no | 68 of 75 | Name, Default value, Description | Missing: `DB_CHARSET`, `DB_MAXPOOLSIZE`, `DB_QUERYTIMEOUT`, `INSTANCE_CHILDREN_INDEX_BATCH_SIZE`, `JAVA_OPTIONS`, 2 `KAFKA_CONSUMER_EVENTS_*`; 28 more names read in `application.yml` placeholders |
+| mod-notes | 20 | 0 | no | 0 (prose only) | | 11 more read in config, e.g. `DB_CONNECTION_TIMEOUT` |
+| mod-users | 18 | 0 | no | 0 | | S3 variables use `AWS_*`; the policy says `S3_` |
+| mod-circulation-storage | 13 | 0 | no | 0 | | |
+| mod-circulation | 12 | 0 | no | 9 of 12 | Variable name, Default value | Missing: `JAVA_OPTIONS`, `REPLICATION_FACTOR`, `SCHEDULED_ANONYMIZATION_NUMBER_OF_LOANS_TO_CHECK` |
+| mod-agreements | 7 | 0 | no | 1 of 7 | Variable, Description, Options, Default | Groovy `${CONST}` strings look like variables (false positives) |
+| edge-patron | 3 | 0 | no | 2 of 3 | Property, Default, Description | Secure-store settings are Java system properties (`secure_store`) |
+| mod-inventory-storage | 49 | 0 | no | 0 (bullet list) | | |
 
-Every name is `[A-Z0-9_]`. Read literally, sub-check 1 fails all eight modules. Policy section 7.2
-says existing modules are "encouraged" to comply; section 5.2 makes it a must for new modules.
+"In a README table" counts descriptor variable names that appear in a Markdown table row. No
+module has `ENV_VARS.md`, and no table has a required/optional column. Every name is `[A-Z0-9_]`.
+Read literally, sub-check 1 fails all eight modules. Policy section 7.2 says existing modules are
+"encouraged" to comply; section 5.2 makes it a must for new modules.
 
 ### E3. Interface naming is mostly clean; permission naming is not
 
@@ -256,7 +266,7 @@ One cached artifact, `backendEvidence` (`src/utils/backend-evidence.ts`), read f
 blobs (`readCommittedSource`, 2,000 files, default byte limits; mod-inventory-storage has 1,524
 files).
 
-**Include filter.** With the default limits (`committed-source.ts:34-40`: 256 KB per file, 8 MB in
+**Include filter.** With the default limits (`committed-source.ts:34-41`: 256 KB per file, 8 MB in
 total), binary and oversized files are material diagnostics that would mark every sampled module
 incomplete (mod-search's PNG diagrams, mod-users' 2.1 MB test JPEG, mod-agreements' 7.9 MB in
 total). `backendEvidence` therefore reads only:
@@ -307,14 +317,21 @@ because it lists client classes, not services. S008's public
 
 ### Applicability (Q4)
 
-Classification order:
+Classification builds on `classifyModuleKind` as merged in #69, which checks for a descriptor
+before the library allowlist:
 
-1. Libraries, from `classifyModuleKind` (PR 0). `edge-common` and `edge-common-spring` are shared
-   libraries; the B001 PR adds `edge-common*` to the library allowlist if PR 0 has not.
-2. Edge modules: an `edge-` artifactId and an `edge-common*` dependency. Clone basenames are
-   timestamps, so the directory name cannot be used.
-3. Backend modules: `backend-module` from `classifyModuleKind`, which requires a descriptor.
-4. `ambiguous`: a Java repository with no descriptor that is not a known library.
+1. `backend-module` from `classifyModuleKind` (a descriptor was found). The B layer splits it:
+   an `edge-` artifactId plus an `edge-common*` dependency makes an edge module (edge-patron);
+   anything else is a backend module.
+2. `library` from `classifyModuleKind` (allowlist, no descriptor). The B001 PR adds
+   `edge-common` and `edge-common-spring` to `EXPLICIT_LIBRARY_NAMES`, so they are libraries
+   rather than ambiguous. Because the descriptor check runs first, a shared library would only be
+   misclassified if it shipped a descriptor; none of the sampled ones does.
+3. `ambiguous` from `classifyModuleKind`, for a Java repository: an edge module when it has the
+   edge artifactId and dependency (so B001 can fail it for having no template); otherwise
+   ambiguous.
+
+Clone basenames are timestamps, so the directory name is never used.
 
 | Criterion | Backend module | Edge module | Backend library | Ambiguous |
 | --- | --- | --- | --- | --- |
@@ -331,7 +348,7 @@ Classification order:
 
 The gist gives B006 an existing-module exception, and the env-variable policy distinguishes new
 modules (must comply) from existing ones (encouraged). A new flag, `--existing-module`, records the
-evaluation kind (default: new). It changes B004 sub-check 1 gaps (descriptor fields and the
+evaluation kind (default: new). It changes B004 sub-check 1 gaps (a missing or incomplete
 ENV_VARS.md or README table) from fail to manual, allows RAML for RMB modules in B006, and turns
 B005 naming violations into manual (Q13; B007 naming is manual in both modes). It does not relax
 B004 C3: policy section 5.1 says existing modules MUST add `S3_` names alongside `AWS_` ones.
@@ -368,7 +385,7 @@ reviewer's checklist.
 B004, B007, B010, B011, B013, B015. B002, B003, B008 and B012 carry a new per-criterion
 `optInOnly` flag in the agent-review registry. They run only when named in
 `--criterion-agent-criteria`, and otherwise report the `notRunReason` "agent review for B002 runs
-only when listed in --criterion-agent-criteria". The skip regex at `report-html-template.ts:140`
+only when listed in --criterion-agent-criteria". The skip regex at `report-html-template.ts:141`
 becomes `[SFB]\d+`.
 
 A list keeps today's meaning: it replaces the defaults for the whole run, S criteria included
@@ -557,21 +574,29 @@ Five sub-checks, each a checklist group.
 
 | Sub-check | Deterministic part | Fails when (new-module mode) |
 | --- | --- | --- |
-| C1 Documented with required fields | Each descriptor `env` entry has `name`, `value` (may be empty), `required` and `description`; the variable also appears in `ENV_VARS.md` or a README table (policy section 3.1, Q12); Spring `${NAME:…}` placeholders in the module's own `application*.yml` that are not in the descriptor | a field is missing (all 8 sampled modules), the second location is missing, or a Spring placeholder variable is undocumented |
-| C2 Required vs optional | `required: true` with a non-empty top-level `env.value` or a code default; `required: false` without any default | a variable with a default is marked required |
+| C1 Documented with required fields | Every variable the module uses appears in `ENV_VARS.md` or a README table (Q2, Q12), and the table gives a default (may be empty), required or optional, and a description for it. "Uses" means named in either descriptor env list, read in code (`System.getenv`, `@Value`), or a `${NAME:…}` placeholder in the module's own `application*.yml` | no `ENV_VARS.md` or README table naming the variables (4 of 8 sampled modules), a used variable missing from it (mod-search: 7 of 75), or a table without a default, required/optional or description column (all 4 modules with tables lack required/optional) |
+| C2 Required vs optional | Required/optional from the documentation; defaults from the documentation, a top-level `env[].value`, or a code default | a variable documented as required has a non-empty default |
 | C3 Naming | `^[A-Z0-9_]+$`; category prefixes `DB_`, `KAFKA_`, `S3_` (not `AWS_`), `ELASTICSEARCH_`, `SYSTEM_USER_`, `*_ENABLED` | a name breaks the format, or uses `AWS_` without an `S3_` equivalent (also in existing-module mode, section 5.1) |
 | C4 Startup behaviour | Fail-fast evidence for required variables from the B004 collector (the same "clear fail-fast" patterns S010 uses, applied to every name) | never by itself |
 | C5 No secrets in startup logs | log statements near config loading that print secret-like names; environment dumps | never by itself |
 
-Location (Q2): entries in top-level `env` or `launchDescriptor.env` both count; the report notes
-that the policy names top-level `env`. Only a top-level `env[].value` counts as a default. A
-`launchDescriptor.env[].value` is a deployment value (mod-users sets `KAFKA_HOST` to `10.0.2.15`
-and `DB_PASSWORD` to `folio_admin`), not a default. Framework variables (RMB `DB_*`,
-folio-spring-base defaults) count as declared by the module only when the module's own config
-reads them.
+Documentation location (Q2, B, decided): only `ENV_VARS.md` or a README table counts as
+documentation. A README table is a Markdown table whose rows name the variable, under any
+heading, in `README.md` or `README.MD`. Prose and bullet lists (mod-notes, mod-inventory-storage)
+do not count. Columns are recognised by header words: default (`Default`, `Default value`),
+required or optional (`Required`, `Optional`, `Mandatory`), and description (`Description`).
 
-**Rules:** `fail` as in the table (Q8; in `--existing-module` mode C1 gaps are manual, C3 still
-fails).
+Neither descriptor env list counts as documentation. `launchDescriptor.env` and top-level `env`
+are only inputs that say which variables the module uses. B004 does not require a top-level `env`,
+although the policy also asks for one; the report says so in one line.
+
+Only a top-level `env[].value` counts as a default. A `launchDescriptor.env[].value` is a deployment
+value (mod-users sets `KAFKA_HOST` to `10.0.2.15` and `DB_PASSWORD` to `folio_admin`), not a
+default. Framework variables (RMB `DB_*`, folio-spring-base defaults) count as used by the module
+only when the module's descriptor or own config names them.
+
+**Rules:** `fail` as in the table (Q8, Q12; in `--existing-module` mode C1 gaps are manual, C3
+still fails).
 `pass`: C1–C3 clean, every required variable has fail-fast evidence, and no C5 signals. Otherwise
 `manual`.
 
@@ -584,15 +609,22 @@ Groovy strings) are real environment variables (`discovered:env:<n>` for others)
 **Report:**
 
 ```text
-B004 fail: The module descriptor documents 18 environment variables, but none says whether it is
-required and none has a description. 5 S3 variables use the AWS_ prefix instead of S3_.
-  - C1 Documentation: 18 of 18 lack "required"; 18 of 18 lack "description" (descriptors/ModuleDescriptor-template.json); no ENV_VARS.md or README table
-  - C2 Required vs optional: cannot be checked without "required"
+B004 fail: The module uses 18 environment variables, but none is documented in ENV_VARS.md or a
+README table. 5 S3 variables use the AWS_ prefix instead of S3_.
+  - C1 Documentation: no ENV_VARS.md; README.md has no table naming the variables. The 18 names
+    come from launchDescriptor.env in descriptors/ModuleDescriptor-template.json, which does not
+    count as documentation.
+  - C2 Required vs optional: cannot be checked without documentation
   - C3 Naming: AWS_URL, AWS_REGION, AWS_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (policy: S3_ prefix; existing modules add S3_ names alongside); AWS_SDK is a flag, not a credential
   - C4 Startup behaviour: no fail-fast evidence found
   - C5 Startup logging: no signals found
 Checklist for the reviewer: B004-C4 Each required variable stops startup with a clear message when missing …
 ```
+
+For mod-search, C1 reads: `README.md documents 68 of the 75 environment variables in a table
+(Name, Default value, Description), but the table does not say which are required. Not in the
+table: DB_CHARSET, DB_MAXPOOLSIZE, DB_QUERYTIMEOUT, INSTANCE_CHILDREN_INDEX_BATCH_SIZE,
+JAVA_OPTIONS, KAFKA_CONSUMER_EVENTS_MAX_POLL_INTERVAL_MS, KAFKA_CONSUMER_EVENTS_MAX_POLL_RECORDS.`
 
 ## B005 Provided interfaces follow naming conventions
 
@@ -911,10 +943,16 @@ that catch plausible mistakes:
 - B003: an RMB RAML resource whose derived interface has no implementing class (manual); a handler
   absent from the spec in a Spring module (fail); a wildcard handler.
 - B004:
-  - `required: true` with a top-level `env.value` (fail);
-  - `required: true` with only a `launchDescriptor` value (not a default; no fail);
+  - variables only in `launchDescriptor.env` and top-level `env`, with no ENV_VARS.md or README
+    table (fail: descriptors are not documentation);
+  - a README table that names every variable but has no required/optional column (fail);
+  - the same variables in a bullet list (fail: only tables count);
+  - an ENV_VARS.md table with every column (C1 clean);
+  - a variable documented as required with a default in the table or a top-level `env.value`
+    (fail);
+  - a variable documented as required with only a `launchDescriptor` value (not a default; no
+    fail);
   - `AWS_URL` with and without `S3_URL`, in both modes;
-  - a missing ENV_VARS.md;
   - a non-matching name such as `JAVA_OPTIONS` (collected; S010 would drop it);
   - a Spring placeholder missing from the descriptor;
   - a Groovy `${CONST}` string (not a variable).
@@ -973,7 +1011,7 @@ In `--existing-module` mode:
 
 ## Implementation order (one PR per criterion)
 
-Prerequisites: PR 0 (`classifyModuleKind`, in progress) for library applicability; F PRs 1–2 for
+Prerequisites: PR 0 (`classifyModuleKind`) merged as #69; F PRs 1–2 for
 the checklist, report branch and agent contract; F PR 3 for the handler index (B002 only).
 
 1. **B001** with `backendEvidence`: include filter, descriptor template parsing with build-property
@@ -1003,56 +1041,34 @@ Each PR replaces its placeholder entry in `criteria-definitions.ts` and updates
 `docs/criterion-notes.md`, `docs/agent-review.md` when it adds agent review, the README criteria
 list and the HTML short-name table.
 
-## Open questions
+## Decisions
 
-- **Q1. Add an `--existing-module` evaluation flag?** (A) Yes, default new-module: it relaxes B004
-  C1, B005/B007 naming and allows RAML in B006 for RMB modules, recommended; the gist and the
-  env-variable policy both distinguish existing modules. (B) Always evaluate as new.
-- **Q2. Do variables in `launchDescriptor.env` count as "documented in the ModuleDescriptor"?** The
-  policy names top-level `env`; all sampled modules use `launchDescriptor.env`. (A) Both count,
-  with a note, recommended. (B) Top-level only.
-- **Q3. Does an undeclared consumed interface fail B002, like F001?** The only candidate in eight
-  modules is dead code. (A) Manual, recommended. (B) Fail.
-- **Q4. Is the applicability table right for edge modules and libraries?** (A) As proposed,
-  recommended. (B) Apply all criteria to libraries.
-- **Q5. Build the Docker runtime harness?** (A) Yes, as the last PR, behind
-  `--allow-runtime-checks`; it decides only B014, recommended. (B) No; B014 stays static.
-- **Q6. Which B criteria get agent review by default?** (A) The judgment-heavy six (B004, B007,
-  B010, B011, B013, B015) when manual; B002, B003, B008, B012 when listed, recommended. (B) All ten
-  when manual (about twice the cost).
-- **Q7. Do permission-naming deviations fail B007?** (A) No, manual with the list; fail only on
-  `*.all` in `permissionsRequired` or undefined permissions, recommended. (B) Fail in new-module
-  mode.
-- **Q8. Does B004 fail when descriptor entries lack `required` or `description`?** Every sampled
-  module would fail. (A) Fail in new-module mode, manual in existing-module mode, recommended.
-  (B) Always manual.
-- **Q9. Does a folio-integration-tests folder count as "provided" for B009?** (A) Yes with
-  `--allow-remote-lookups` (Karate, provisional, like F002's Cypress), recommended. (B) Only tests in
-  the module repository count.
-- **Q10. How does B016 treat optional unlisted backends (edge-common's Vault and AWS SSM)?** (A)
-  Manual, recommended. (B) Fail.
-- **Q11. Is reading another module's schema in an upgrade migration acceptable for B011?** (A)
-  Manual for migrations, fail elsewhere, recommended. (B) Always fail.
+The user answered every question on 2026-10-23. All answers are the recommendation (A) except Q2.
 
-New in version 2, from the oracle review:
+| | Question | Decision |
+| --- | --- | --- |
+| Q1 | Add an `--existing-module` evaluation flag? | **A.** Yes, default new-module. It relaxes B004 C1 and B005 naming, and allows RAML in B006 for RMB modules. |
+| Q2 | Does `launchDescriptor.env` count as documentation? | **B.** No. Only `ENV_VARS.md` or a README table counts. Descriptor env lists (`launchDescriptor.env` and top-level `env`) are inputs that say which variables exist, not documentation. |
+| Q3 | Does an undeclared consumed interface fail B002? | **A.** No, manual. The only candidate in eight modules is dead code. |
+| Q4 | Is the applicability table right for edge modules and libraries? | **A.** As proposed, including the ambiguous column. |
+| Q5 | Build the Docker runtime harness? | **A.** Yes, as the last PR, behind `--allow-runtime-checks`; it decides only B014. |
+| Q6 | Which B criteria get agent review by default? | **A.** B004, B007, B010, B011, B013 and B015 when manual; B002, B003, B008 and B012 only when listed. |
+| Q7 | Do permission-naming deviations fail B007? | **A.** No, manual with the list. B007 fails only on a required `*.all` or undefined permission. |
+| Q8 | Does B004 fail on documentation gaps? | **A.** Fail in new-module mode, manual in existing-module mode. |
+| Q9 | Do folio-integration-tests suites count as provided for B009? | **A.** Yes, with `--allow-remote-lookups`; Karate passes with a provisional note. |
+| Q10 | How does B016 treat optional unlisted backends? | **A.** Manual (edge-common's Vault and AWS SSM). |
+| Q11 | Is reading another module's schema in a migration acceptable for B011? | **A.** Manual for migrations, fail elsewhere. |
+| Q12 | Must B004 C1 find each variable in `ENV_VARS.md` or a README table? | **A.** Yes, and with Q2 (B) that is the only documentation B004 accepts. Missing or incomplete documentation fails in new-module mode and is manual in existing-module mode. |
+| Q13 | Should `--existing-module` relax B005 naming? | **A.** Yes, manual: renaming an interface breaks its consumers. |
+| Q14 | What is B009 with lookups off and no tests in the repository? | **A.** Manual, "folio-integration-tests not checked". |
+| Q15 | What trust level does the runtime harness need? | **A.** `--allow-runtime-checks` plus `--allow-local-commands`, documented as root-equivalent; a rootless Docker context is recommended, not required. |
+| Q16 | Does a `--criterion-agent-criteria` list add to the defaults or replace them? | **A.** Replace, as today. |
+| Q17 | Do cross-module Kafka topics count as B012 dependencies? | **A.** Yes, as a checklist and agent item only; never a fail. |
 
-- **Q12. Must B004 C1 also find each variable in `ENV_VARS.md` or a README table?** Policy section
-  3.1 asks for both locations. (A) Yes: fail in new-module mode, manual in existing-module mode,
-  recommended. (B) Descriptor only.
-- **Q13. Should `--existing-module` relax B005 naming?** The gist grants an existing-module
-  exception only for B006. (A) Yes, manual: renaming an interface breaks its consumers,
-  recommended. (B) No, B005 fails existing modules too (mod-users' `users.settings`).
-- **Q14. What is B009 when remote lookups are off and the repository has no API tests?** (A)
-  Manual, "folio-integration-tests not checked", recommended. (B) Not applicable with a
-  "not checked" note.
-- **Q15. What trust level does the runtime harness need?** (A) `--allow-runtime-checks` plus
-  `--allow-local-commands`, documented as root-equivalent, with a rootless Docker context
-  recommended but not required, recommended. (B) Also require a dedicated rootless Docker context.
-- **Q16. Does a `--criterion-agent-criteria` list add to the defaults or replace them?** (A)
-  Replace, as today, so listing B002 alone runs only B002, recommended. (B) Add opt-in criteria to
-  the defaults (a new flag meaning).
-- **Q17. Do Kafka topics the module shares with other modules count as B012 dependencies?** (A)
-  Yes, as a checklist and agent item only (never fail), recommended. (B) No.
+**Reading of Q2 (B).** The question offered "top-level `env` only" as option B. The answer says
+only `ENV_VARS.md` or a README table counts, so version 3 treats neither descriptor env list as
+documentation, and does not require a top-level `env`. If a top-level `env` should also be
+required, as policy section 3.1 asks, C1 gains one more fail condition.
 
 ## Risks
 
@@ -1075,6 +1091,30 @@ New in version 2, from the oracle review:
 - Non-Java backends. Every B entry has `languages: ['java']`, so Go (on the OST list) and Node
   backends never reach `BackendEvaluator`. Supporting them means new catalog languages and
   evaluators.
+
+## Version 3 changes
+
+- **Decisions recorded.** Q1–Q17 replace the open questions (see [Decisions](#decisions)).
+- **B004 C1 rewritten for Q2 (B) and Q12.**
+  - Only `ENV_VARS.md` or a README table counts as documentation. Descriptor env lists say which
+    variables exist; they are not documentation.
+  - The table must give a default, required or optional, and a description for every variable
+    the module uses.
+  - C2 reads required/optional from that documentation.
+  - E2 gains real documentation data: no sampled module has `ENV_VARS.md`, and 4 have README
+    tables (mod-search 68 of 75 variables, mod-circulation 9 of 12, edge-patron 2 of 3,
+    mod-agreements 1 of 7), none with a required/optional column.
+  - The report examples, fixtures and the existing-module wording follow. Expected results are
+    unchanged: B004 still fails all eight modules in new-module mode.
+- **Rebased onto `origin/master` `0069e91`.**
+  - PR 0 merged as #69. Its `classifyModuleKind` checks for a descriptor before the library
+    allowlist, so the applicability section now builds on that order instead of "libraries
+    first". `edge-common*` is still missing from the allowlist, and the B001 PR adds it.
+  - S013 is merged and reads `backend-integration-testing` as the `s013` consumer.
+  - Line references moved by #69–#74 are updated: `s008-interface-declarations.ts`,
+    `license-compliance.ts`, `remote-evidence.ts`, `module-kind.ts`, `criterion-agent-review.ts`,
+    `report-html-template.ts`, `committed-source.ts` and `criteria-definitions.ts`. No referenced
+    function was removed by the dead-code cleanup (#71).
 
 ## Review changes
 
