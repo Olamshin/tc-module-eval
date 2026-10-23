@@ -1,8 +1,14 @@
 # F001–F007 evaluator design
 
-Status: design proposal, not implemented. Based on `origin/master` at `53eed3a` (S012 #66 and
-S014 #65 merged; S011 and S013 in progress elsewhere). All real-world numbers were collected on
+Status: design proposal, version 2, awaiting the user's review; not implemented. Q1–Q9 were
+decided on 2026-10-23 (see [Decisions](#decisions)). Based on `origin/master` at `53eed3a` (S012 #66
+and S014 #65 merged; S011 and S013 in progress elsewhere). All real-world numbers were collected on
 2026-10-23 and will drift.
+
+Changes in version 2: Q1–Q9 recorded as decisions, all as recommended. A small PR fixing
+`classifyModuleKind` (Q7) now comes first in the implementation order. Q6 is made concrete: when
+agent review is enabled without `--criterion-agent-criteria`, F001, F003 and F006 run; F004 and
+F007 run only when runtime evidence was collected; F002 runs only when listed.
 
 The Frontend criteria from the [master list](https://gist.github.com/okolawole-ebsco/f54f7617b61680f2ad346896e807a796)
 apply to UI modules and shared UI libraries alike. `src/evaluators/javascript/frontend-evaluator.ts`
@@ -151,7 +157,8 @@ part of it.
 so stripes-components and stripes-smart-components (both on the allowlist) come out as
 `ui-module` ("Stripes metadata found in package.json"); stripes-testing comes out as `library`.
 F001–F007 apply to libraries anyway, but S004, S005, S008, S010 and S014 treat libraries as
-`not_applicable`, so this is an existing bug outside F001–F007 (Q7).
+`not_applicable`, so this is an existing bug outside F001–F007. Decided (Q7): fix it first, in
+its own PR (PR 0).
 
 ### F9. E2E tests live in stripes-testing, not in module repositories
 
@@ -238,9 +245,24 @@ change meaning once released; a new check takes the next number.
 
 ### Agent review contract for F00x criteria
 
-Agent review runs only when the deterministic status is `manual`, as today, and only for criteria
-listed in `--criterion-agent-criteria`. It uses `runCriterionAgentReview()` with repository
-browsing (the shared default).
+Agent review runs only when the deterministic status is `manual`, as today. It uses
+`runCriterionAgentReview()` with repository browsing (the shared default).
+
+Which F criteria run (decided, Q6). Today, enabling agent review without
+`--criterion-agent-criteria` lets every agent-capable criterion run, and listing criteria narrows
+that. The F criteria add two conditions on top:
+
+| Criterion | Agent review enabled, no criteria list | Listed in `--criterion-agent-criteria` |
+| --- | --- | --- |
+| F001, F003, F006 | runs | runs |
+| F004, F007 | runs only with runtime evidence | runs only with runtime evidence |
+| F002 | does not run | runs |
+| F005 | no agent review | no agent review |
+
+When a condition stops a review, the report gives the reason in the existing note, for example
+"Agent review: Not run: F004 agent review needs runtime evidence (--ui-runtime-url)" or "Not run:
+F002 agent review runs only when listed in --criterion-agent-criteria". Layers 1 and 2 are shown
+as usual.
 
 Starting material, under `.criterion-agent/<ID>/`:
 
@@ -282,7 +304,8 @@ Semantic validation (all-or-nothing, as today). The response is rejected when:
 5. an `aligned_fact` has `coverageDisposition: unresolved`, or an `evidence_gap` has `investigated`;
 6. an `analyzer_limitation` targets an obligation with no deterministic finding;
 7. a runtime item is assessed `aligned_fact` without runtime evidence supplied (the agent cannot
-   claim that a page renders or passes axe from source alone);
+   claim that a page renders or passes axe from source alone). This matters for F006-C7, since
+   F006 also reviews without runtime evidence; F004 and F007 reviews always have it;
 8. criterion-specific rules listed under each criterion.
 
 `likely_sufficient` therefore means "every item checked and nothing wrong", never "nothing found".
@@ -301,14 +324,16 @@ Semantic validation (all-or-nothing, as today). The response is rejected when:
 - **Cost and time per review** (from F10): about $0.02–0.05 and 1–4 minutes with
   deepseek-v4-flash. A full UI evaluation with all six agent-capable criteria is about
   $0.10–0.30 and 8–20 minutes. With $4.95 of the $10 OpenRouter limit left, that is roughly
-  15–45 full UI evaluations. Recommend F001, F003 and F006 by default; F004 and F007 add most when
-  runtime evidence is available (Q6).
+  15–45 full UI evaluations. With the Q6 default (F001, F003 and F006; F004 and F007 only with
+  runtime evidence) a module costs about $0.06–0.15 and 3–12 minutes without runtime evidence,
+  roughly 30–80 modules on the remaining budget.
 - A rejected response is reported as unavailable with the reason; the evaluator does not retry.
 
 ### Optional runtime UI evidence (F004, F006, F007)
 
 A running UI makes F004 and F007 reviews much better, so it is an optional input, never a
-requirement and never a status source.
+requirement and never a status source. Decided (Q5): it is built in the F004 PR. Without it, F004
+and F007 still report layers 1 and 2; only their agent review is skipped (Q6).
 
 - New flag `--ui-runtime-url <origin>` plus credentials in `FOLIO_UI_USERNAME`,
   `FOLIO_UI_PASSWORD` (and `FOLIO_UI_TENANT` when needed). Without them nothing runs.
@@ -423,7 +448,8 @@ and workflow steps that run them (from the S012 build-test evidence). Policy: th
 
 ### Agent review
 
-Only in the manual case. Asked to classify each suite as E2E or component test and to say which
+Only in the manual case, and only when F002 is listed in `--criterion-agent-criteria` (Q6).
+Asked to classify each suite as E2E or component test and to say which
 runner CI uses. Obligations `F002-C1:<suite path>`, `F002-C2`. Usually short (stripes-components:
 Karma + BigTest).
 
@@ -507,7 +533,8 @@ supplied, to map each axe violation to the component that renders it and separat
 problems from platform ones (stripes-core navigation, Keycloak login). Starting material adds
 `guides/accessibility/*.mdx` from the pinned stripes-components snapshot. Obligations
 `F004-C1:<page>:<rule>` (runtime only), `F004-C2:<path>:<line>`, `F004-C3` … `F004-C5`.
-Criterion rule: without runtime evidence, `F004-C1` must be `evidence_gap`/`unresolved`.
+Runs only when runtime evidence was collected (Q6), so `F004-C1` always has axe results to
+assess.
 
 ### Report
 
@@ -602,9 +629,8 @@ errors and failed requests per page.
 
 ### Agent review
 
-Recommended only with runtime evidence (Q6). Asked to explain each console error from source and
-to review flagged browser-specific code. Criterion rule: without runtime evidence `F007-C1` is
-`evidence_gap`.
+Runs only when runtime evidence was collected (Q6). Asked to explain each console error from
+source and to review flagged browser-specific code.
 
 ### Report
 
@@ -639,6 +665,8 @@ Stable): no console errors, 1 failed request …`.
 - Agent review through the existing fake adapter: one accepted response per criterion, plus
   rejections for each validation rule (missing obligation, uncited assessment,
   `likely_sufficient` with an `evidence_gap`, runtime `aligned_fact` without runtime evidence).
+- Agent selection (Q6): with agent review enabled and no criteria list, F001 runs, F002 does not,
+  and F004 without runtime evidence does not; each skip shows its reason.
 - Report tests: the three layers appear with review disabled, accepted and rejected; checklist
   items not covered by the agent are labelled.
 - Runtime probe: a loopback HTML page with known axe violations and a console error; no network.
@@ -662,8 +690,16 @@ Also run F001, F003 and F006 with agent review on ui-checkin and ui-users and re
 acceptance, and which checklist items the agent covered; run F004/F007 once with runtime evidence
 against the Eureka snapshot when credentials are available.
 
-## Implementation order (one PR per criterion)
+## Implementation order (one PR per criterion, after a classification fix)
 
+0. **`classifyModuleKind` fix** (Q7), small and on its own: check the explicit library allowlist
+   before the UI markers in `src/utils/module-kind.ts`, so allowlisted Stripes libraries with a
+   `stripes` object (stripes-components, stripes-smart-components and stripes-core today) are
+   `library`. `ui-*` names are not on the allowlist, so UI modules are
+   unaffected. One regression test in `module-kind.test.ts` with a `stripes` object and an
+   allowlisted name. Expected result changes: S004, S005, S008, S010 and S014 become
+   `not_applicable` for those libraries; real-module checks on stripes-components and ui-users
+   confirm it. F001–F007 apply to both kinds, so the later PRs do not depend on it.
 1. **F005**: wire `FrontendEvaluator` handlers, the shared checklist model and three-layer report
    rendering (without agent), F005 on S007's artifact. Smallest, and it settles the report shape.
 2. **F003**: i18n checks; first agent consumer, so it adds the F00x agent contract
@@ -680,36 +716,34 @@ Each PR updates `criteria-definitions.ts` (drops the `not_implemented` default),
 `docs/criterion-notes.md`, `docs/agent-review.md` when it adds agent review, the README criteria
 list, and the HTML short-name table.
 
-## Decisions needed
+## Decisions
 
-- **Q1. Should an unambiguous undeclared interface fail F001?** (A) Yes, with file and line, for
-  modules and libraries alike, recommended: the evidence is concrete and the fix is one line in
-  `package.json`. (B) Manual. With A, four of the seven sampled repositories fail today.
-- **Q2. Where does F001's handler index come from?** (A) The checked-in S008 catalog, extended with
-  handler patterns (offline, R1-2026-GA), recommended. (B) Also read `snapshot` from FAR when
-  `--allow-remote-lookups` is on (more current, 2.3 MB). Default: A.
-- **Q3. Does Cypress pass F002 although the policy marks it provisional?** (A) Yes, with a note,
-  recommended: FOLIO's own E2E suites use it. (B) Manual, as S012 treats provisional Gradle.
-- **Q4. Do message ids missing from `en.json` fail F003?** (A) Manual with the list, recommended.
-  (B) Fail.
-- **Q5. Build the optional runtime probe (`--ui-runtime-url` and credentials)?** (A) Yes, in the
-  F004 PR, as agent input only, recommended. (B) Defer; F004 and F007 stay source-only.
-- **Q6. Which F criteria get agent review by default?** (A) F001, F003 and F006; F004 and F007
-  only with runtime evidence, recommended (about $0.06–0.15 per module). (B) All six.
-- **Q7. Fix the library classification (F8) first, in its own PR?** (A) Yes, recommended; it
-  changes S004/S005/S008/S010/S014 results for stripes-components and stripes-smart-components.
-  (B) Leave it.
-- **Q8. How does F005 treat Stripes constituent libraries?** (A) Manual with checklist item
-  F005-C2, recommended. (B) Not applicable.
-- **Q9. May the evaluator vendor a pinned snapshot of the stripes-components UX guidelines?**
-  (A) Yes, about 60 KB under `config/f006-ux-guidelines/` with its commit, recommended; the
-  agent cannot read other repositories. (B) Give the agent only the checklist.
+All decided on 2026-10-23, each as recommended. Q1, Q3, Q5, Q6 and Q7 were answered by the user;
+the defaults for Q2, Q4, Q8 and Q9 stand.
+
+- **Q1. An unambiguous undeclared interface fails F001**, with file and line, for modules and
+  libraries alike. Four of the seven sampled repositories fail today.
+- **Q2. F001's handler index comes from the checked-in S008 catalog**, extended with handler
+  patterns (offline, R1-2026-GA). Reading `snapshot` from FAR under `--allow-remote-lookups` is a
+  possible later addition (R1).
+- **Q3. Cypress passes F002** with a note that the policy marks it provisional ("Cypress 12.0,
+  pending verification").
+- **Q4. Message ids missing from `en.json` make F003 manual**, with the list; they do not fail it.
+- **Q5. The optional runtime probe is built** in the F004 PR (`--ui-runtime-url` plus
+  credentials), as agent input only.
+- **Q6. Agent review by default for F001, F003 and F006**; for F004 and F007 only when runtime
+  evidence was collected; F002 only when listed in `--criterion-agent-criteria`. See "Which F
+  criteria run".
+- **Q7. `classifyModuleKind` is fixed first**, as its own small PR (PR 0).
+- **Q8. Stripes constituent libraries are manual for F005**, with checklist item F005-C2.
+- **Q9. The evaluator vendors a pinned snapshot of the stripes-components UX guidelines**, about
+  60 KB under `config/f006-ux-guidelines/` with its commit.
 
 ## Risks
 
 | | Risk | How we notice | What we do |
 | --- | --- | --- | --- |
-| R1 | The handler index is a GA release; new interfaces look unknown | "Path not in the catalog" rows | Manual, never fail; Q2 B later |
+| R1 | The handler index is a GA release; new interfaces look unknown | "Path not in the catalog" rows | Manual, never fail; a FAR `snapshot` read under `--allow-remote-lookups` could be added later |
 | R2 | Constant resolution misses hook-heavy modules (ui-agreements) | Many unresolved sites | Manual plus agent F001-C2; extend resolution later |
 | R3 | Agent reviews time out or are rejected on large modules | Unavailable note in the report | Obligation cap, browse scope, 420 s timeout; layers 1 and 2 still stand |
 | R4 | OpenRouter budget runs out | Provider error | Default to three agent criteria; costs measured per PR |
