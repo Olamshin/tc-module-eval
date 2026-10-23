@@ -1,7 +1,8 @@
 # F001–F007 evaluator design
 
-Status: design proposal, version 4, awaiting the user's review; not implemented. Q1–Q9 were
-decided on 2026-10-23; version 4 folds in an Oracle review and adds three new questions (Q10–Q12).
+Status: design proposal, version 5, awaiting the user's review; not implemented. Q1–Q12 are all
+decided (2026-10-23); version 4 folded in an Oracle review, and version 5 records the answers to
+Q10–Q12.
 Based on `origin/master` at `53eed3a` (S012 #66 and S014 #65 merged; S011 and S013 are on unmerged
 branches). All real-world numbers were collected on 2026-10-23 and will drift.
 
@@ -19,6 +20,21 @@ back to `not_implemented` today.
 | F005 | Uses the Stripes version on the OST page | S007's own Stripes finding, committed Trillium policy | None | Same outcome as S007's Stripes finding; manual for Stripes constituent libraries. |
 | F006 | Follows FOLIO UI layouts, patterns and norms | Pattern signals and documentation links | Most of the criterion, against a pinned snapshot of the UX guidelines | `not_applicable` without rendered UI (Q10); otherwise always manual. The agent review is the main value. |
 | F007 | Works in the latest Chrome | Browser-specific code signals | Explaining console errors from optional runtime evidence | `not_applicable` without rendered UI (Q10); otherwise always manual. |
+
+## Changes in version 5
+
+- **Q10 decided (A):** F003, F004, F006 and F007 are `not_applicable` for packages with no JSX in
+  production code and no `translations/` directory.
+- **Q11 decided (A):** PR 0 also classifies a `stripes` object whose `actsAs` is missing or holds
+  only empty strings as a library.
+- **Q12 decided:** runtime text goes to the model provider, unredacted beyond what already
+  exists. The user: "i dont care about redaction. this is open source code." The best-effort
+  redaction of patron names and console text is dropped, and so are the probe-specific removals of
+  query strings and axe node HTML. Kept: size caps (for cost), the shared `redactSensitiveText`
+  used for agent output (secrets and tokens), and the other probe safety rules (allowlisted
+  routes, pinned login origin, no non-GET or third-party requests, budgets). The probe should
+  point at a test or reference environment, because it reads a running instance, not the
+  repository. Screenshots stay out because agent files are text only.
 
 ## Review changes (version 4)
 
@@ -49,7 +65,8 @@ Blocking, fixed:
    did not stop page-load writes, and would have sent screenshots and DOM snippets with patron
    data to the provider. It is now specified with a route allowlist, a pinned login origin,
    blocked non-GET API calls and third-party requests, redaction, no screenshots, a navigation
-   record and budgets (see "Optional runtime UI evidence").
+   record and budgets (see "Optional runtime UI evidence"; the redaction was dropped in version 5,
+   Q12).
 5. **Runtime citations.** The shared citation check only exempts S006 (`criterion-agent-review.ts:230-243`),
    and agent files are text only. A shared `generatedEvidencePaths` request option replaces the
    S006 special case in the F004 PR, and runtime evidence is text only.
@@ -68,8 +85,8 @@ Improvements, fixed:
 8. PR 0's effects: S010 has its own classifier (`s010-evidence.ts`) and is unaffected; S004, S005,
    S008 and S014 change. Basename checks never match real runs (`git.ts:28` clones into
    `<name>/<timestamp>`), so only package names count. F001 must call the UI declaration reader
-   directly, because `collectS008Declarations` rejects libraries. Q11 asks whether PR 0 should also
-   cover `stripes-acq-components` and similar packages.
+   directly, because `collectS008Declarations` rejects libraries. Q11 (decided A) extends PR 0 to
+   `stripes-acq-components` and similar packages.
 9. F005 reuses S007's own finding, not just its comparison: the artifact producer and S007's
    observation evaluation are extracted from `SharedEvaluator`, so `--criteria F005` works alone.
 10. F002 does its own E2E-runner detection (S012's build-test evidence has build tools only), picks
@@ -95,13 +112,12 @@ Improvements, fixed:
 
 Looser than the Oracle suggested:
 
-- **Redaction is best-effort.** Tokens, cookies, e-mail addresses, query strings and axe node HTML
-  are removed, but patron names in free-form console text cannot be found reliably. Console text
-  is limited to 200 characters per message, kept out of the HTML report (counts only) and sent to
-  the provider only if Q12 allows it.
-- **The low-privilege account is documented, not enforced.** The evaluator cannot inspect the
-  account's permissions; the flag's help text and `docs/criterion-notes.md` require a dedicated
-  read-only account.
+- **Redaction was best-effort** in version 4. Superseded in version 5: the user dropped
+  probe-specific redaction (Q12); only the shared secret and token redaction remains.
+- **The test environment and account are documented, not enforced.** The evaluator cannot tell a
+  test instance from a production one or inspect the account's permissions; the flag's help text
+  and `docs/criterion-notes.md` say to point the probe at a test or reference environment with a
+  test account.
 - **Cypress passes F002 although S007 treats provisional entries as manual.** Q3 was decided this
   way; the F002 report states the difference.
 
@@ -343,7 +359,7 @@ evidence was available".
 - `response-shape.json`: a complete, valid example response;
 - reference material: the pinned UX guidelines for F006, stripes-components' accessibility guides
   for F004, and the handler patterns relevant to F001's unresolved sites;
-- runtime evidence for F004 and F007 (redacted text, see below), if Q12 allows it.
+- runtime evidence for F004 and F007 (text, size-capped, see below; Q12).
 
 **Obligations.** Each non-reviewer-only item yields one obligation, or one per subject. IDs are
 short and per-run: `F003-C1#1`, `F003-C1#2`, …, mapped to their subject (an id, a path and line,
@@ -411,12 +427,14 @@ found".
 ### Optional runtime UI evidence (F004, F007)
 
 Built in the F004 PR (Q5). It is agent input only and never decides a status. It never builds or
-serves the evaluated commit; it only visits an existing deployment.
+serves the evaluated commit; it only visits an existing deployment. Because it reads a running
+instance, not the repository, it should point at a test or reference environment (for example
+the Eureka snapshot), never a production library system.
 
 - **Flags.** `--ui-runtime-url <origin>` (the Stripes UI origin), `--ui-runtime-login-origin
   <origin>` (the identity provider, e.g. Keycloak), credentials in `FOLIO_UI_USERNAME` and
-  `FOLIO_UI_PASSWORD`. Nothing runs without all of them. The documentation requires a dedicated
-  low-privilege, read-only account; the evaluator cannot verify that.
+  `FOLIO_UI_PASSWORD`. Nothing runs without all of them. The documentation asks for a test or
+  reference environment and a test account; the evaluator cannot verify either.
 - **Navigation.** Only same-origin paths built from `stripes.route`, `stripes.home` and
   `/settings<route>`, each matching `^/[A-Za-z0-9-]+$`; anything else is skipped and reported. At
   most 6 pages, 30 s per page, 180 s in total.
@@ -426,17 +444,24 @@ serves the evaluated commit; it only visits an existing deployment.
   token and refresh endpoints, and blocks all requests to origins other than the UI, the login
   origin and the API origin (taken from the UI's `stripes-config`, which must be same-site). No
   clicks or form submissions.
-- **Recorded.** Each navigation and blocked request is recorded with URL (query removed), status
-  and time, like `remoteEvidence`. `docs/criterion-notes.md`, which today calls remote lookups the
-  evaluator's only network reads, is updated.
+- **Recorded.** Each navigation and blocked request is recorded with URL, status and time, like
+  `remoteEvidence`. `docs/criterion-notes.md`, which today calls remote lookups the evaluator's
+  only network reads, is updated.
 - **Collected per page:** axe-core 4.x results for `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`
-  (rule id, impact, target selectors and counts, without node HTML); console errors (each
-  redacted and limited to 200 characters); failed request paths; the Chrome version; the module
-  version shown in `/settings/about`. No screenshots.
-- **Shown:** layer 1 shows counts per page and per rule, the Chrome version and the deployed module
-  version next to the evaluated `package.json` version, labelled "Runtime evidence
-  (informational)". It does not claim that the Chrome version is the current Stable release.
-- **To the agent:** only if Q12 allows it, as `.criterion-agent/F004/axe-results.json` and
+  (rule id, impact, help text, and per node its target selector and HTML); console errors; failed
+  requests; the Chrome version; the module version shown in `/settings/about`. No screenshots,
+  because agent files are text only.
+- **Size caps, for cost:** at most 10 nodes per rule with node HTML cut to 300 characters, 50
+  console messages per page cut to 500 characters, 50 failed requests per page, and 48 KB of
+  runtime evidence per criterion; anything cut is counted and marked as cut.
+- **Secrets and tokens:** the text goes through the existing `redactSensitiveText` (bearer and
+  Okapi tokens, JWTs, credential URLs and similar), the same redaction already applied to agent
+  output. There is no other redaction (Q12).
+- **Shown:** layer 1 shows counts per page and per rule, the first console messages, the Chrome
+  version and the deployed module version next to the evaluated `package.json` version, labelled
+  "Runtime evidence (informational)". It does not claim that the Chrome version is the current
+  Stable release.
+- **To the agent (Q12):** as `.criterion-agent/F004/axe-results.json` and
   `.criterion-agent/F007/console.json`, listed in `generatedEvidencePaths`.
 
 ## F001 Consumed APIs declared in package.json
@@ -790,16 +815,16 @@ index:
 | stripes-connect | to measure | to measure | n/a (no UI) | n/a | manual (constituent) | n/a | n/a |
 
 Agent PRs also record time, cost and acceptance on three modules (see "Measurement"); the F004 PR
-runs the probe once against the Eureka snapshot when a dedicated account is available.
+runs the probe once against the Eureka snapshot with a test account.
 
 ## Implementation order (PR 0, then one PR per criterion)
 
 0. **`classifyModuleKind` fix** (Q7), small and on its own: check the explicit library allowlist
    before the UI markers in `src/utils/module-kind.ts`, by package name (basenames are timestamps
-   in real runs). If Q11 is A, also treat a `stripes` object whose `actsAs` is missing or holds only
-   empty strings as `library`. Effects: S004, S005, S008 and S014 become `not_applicable` for
-   stripes-components, stripes-smart-components, stripes-core (and, with Q11, stripes-acq-components
-   and similar); S010 is unaffected. Regression tests in `module-kind.test.ts`; real checks on
+   in real runs). Also treat a `stripes` object whose `actsAs` is missing or holds only empty
+   strings as `library` (Q11). Effects: S004, S005, S008 and S014 become `not_applicable` for
+   stripes-components, stripes-smart-components, stripes-core, stripes-acq-components,
+   stripes-erm-components, stripes-authority-components and similar; S010 is unaffected. Regression tests in `module-kind.test.ts`; real checks on
    stripes-components and ui-users. F005's constituent-library case depends on this PR.
 1. **F005**: wire `FrontendEvaluator`; the shared checklist model; the F00x branch in
    `reportDetailLines` with `AGENT_REVIEW_CRITERIA` and the `[SF]\d+` regex; extract S007's
@@ -822,8 +847,8 @@ it adds agent review, the README criteria list and the HTML short-name table.
 
 ## Decisions
 
-All decided on 2026-10-23, each as recommended. Q1, Q3, Q5, Q6 and Q7 were answered by the user;
-the defaults for Q2, Q4, Q8 and Q9 stand.
+All decided on 2026-10-23. Q1, Q3, Q5, Q6, Q7 and Q10–Q12 were answered by the user; the
+defaults for Q2, Q4, Q8 and Q9 stand.
 
 - **Q1. An unambiguous undeclared interface fails F001**, with file and line, for modules and
   libraries alike.
@@ -840,22 +865,14 @@ the defaults for Q2, Q4, Q8 and Q9 stand.
 - **Q8. Stripes constituent libraries are manual for F005**, with checklist item F005-C2.
 - **Q9. The evaluator vendors a pinned snapshot of the stripes-components UX guidelines**, about
   60 KB under `config/f006-ux-guidelines/` with its commit.
-
-## New questions (version 4)
-
-- **Q10. Are F003, F004, F006 and F007 `not_applicable` for packages that render no UI?** (A) Yes:
-  no JSX in production code and no `translations/` directory, e.g. stripes-connect, recommended.
-  The gist says Frontend criteria apply to libraries, but i18n, accessibility, layout and browser
-  support have nothing to check without a UI. (B) No: they are evaluated, so F003 fails such
-  packages and F004/F006/F007 are manual with full checklists. Without an answer I will go with A.
-- **Q11. Should PR 0 also classify a `stripes` object without a real `actsAs` as a library?** (A)
-  Yes: `actsAs` missing or only empty strings, e.g. stripes-acq-components, stripes-erm-components,
-  stripes-authority-components, recommended. Their S004, S005, S008 and S014 results become
-  `not_applicable`. (B) Only fix the allowlist order. Without an answer I will go with A.
-- **Q12. May redacted runtime text evidence go to the model provider?** (A) Yes: axe rule ids,
-  selectors and counts, console messages (redacted, 200 characters) and request paths; no
-  screenshots or DOM, recommended. (B) No: runtime evidence appears only in the report, so F004 and
-  F007 agent reviews never run. Without an answer I will go with A.
+- **Q10. F003, F004, F006 and F007 are `not_applicable` for packages that render no UI**: no JSX in
+  production code and no `translations/` directory, e.g. stripes-connect.
+- **Q11. PR 0 also classifies a `stripes` object without a real `actsAs` as a library**: `actsAs`
+  missing or only empty strings, e.g. stripes-acq-components, stripes-erm-components,
+  stripes-authority-components. Their S004, S005, S008 and S014 results become `not_applicable`.
+- **Q12. Runtime text goes to the model provider** without probe-specific redaction ("this is open
+  source code"). Size caps and the shared secret and token redaction stay; the probe should point
+  at a test or reference environment. No screenshots, since agent files are text only.
 
 ## Risks
 
@@ -866,8 +883,8 @@ the defaults for Q2, Q4, Q8 and Q9 stand.
 | R3 | Agent reviews time out or are rejected | Unavailable note; per-PR measurement | 420 s default, cap of 25, browse scope; merge blocked above one rejection in three; layers 1 and 2 still stand |
 | R4 | OpenRouter budget runs out | Provider error | Estimates include S criteria; `--criterion-agent-criteria` narrows |
 | R5 | Runtime evidence reflects the deployed version, not the commit | Deployed version shown next to `package.json` | Informational only |
-| R6 | The probe changes a shared environment | Blocked-request record | Non-GET blocked except login, no clicks, route allowlist, budgets, dedicated account (documented) |
-| R7 | Runtime evidence carries patron data or tokens | Review of recorded evidence | Query strings, node HTML and screenshots dropped; token and e-mail redaction; console text capped; provider only with Q12 |
+| R6 | The probe changes a shared environment | Blocked-request record | Non-GET blocked except login, no clicks, route allowlist, budgets; documented for test or reference environments with a test account |
+| R7 | The probe is pointed at a production instance, so its data reaches the provider | Origin shown in the report | Documented as test or reference environments only (Q12); shared secret and token redaction; size caps |
 | R8 | The UX guideline snapshot goes stale | Recorded commit and date | Maintainer refresh |
 
 ## Out of scope
