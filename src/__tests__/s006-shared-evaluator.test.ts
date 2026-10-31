@@ -318,6 +318,33 @@ describe('S006 shared evaluator', () => {
     expect(result.agentReview?.warnings.join('\n')).toContain('Dropped');
   });
 
+  it('drops the review\'s own sources when they cite only generated context and shows why', async () => {
+    writeRepoFile('docs/secrets.md', 'Example: Bearer abcdefghijklmnopqrstuvwxyz123456\n');
+
+    const result = await evaluator.evaluateCriterion('S006', tempRoot, createRunWithAgent(fakeAgentConfig({
+      available: true, criterionId: 'S006', recommendation: 'needs_reviewer_judgment', confidence: 'medium',
+      summary: 'Usage is unclear.', rationale: 'Only documentation mentions it.',
+      evidenceReferences: ['.criterion-agent/S006/finding-summary.json'],
+      assessments: ['scope', 'finding:0'].map(technologyId => ({ technologyId, type: 'evidence_gap',
+        summary: 'Usage requires confirmation.', coverageDisposition: 'unresolved', evidenceReferences: ['docs/secrets.md'] })),
+      reviewerActions: [{ action: 'Obtain deployment usage for this value.', evidenceReferences: ['docs/secrets.md'] }],
+      warnings: [], errors: []
+    })));
+    const lines = result.details!.split('\n');
+
+    expect(result.status).toBe(EvaluationStatus.MANUAL);
+    expect(result.agentReview?.available).toBe(true);
+    expect(lines.slice(lines.indexOf('  - What to verify:'), lines.indexOf('  - Advisory only; the S006 result stays Manual review.') + 1)).toEqual([
+      '  - What to verify:',
+      '    - Obtain deployment usage for this value.',
+      '      - Sources:',
+      '        - docs/secrets.md',
+      '  - Dropped from this review:',
+      '    - The review\'s own sources: None of them is a repository file.',
+      '  - Advisory only; the S006 result stays Manual review.'
+    ]);
+  });
+
   it('preserves manual S006 status when OpenCode review command fails', async () => {
     writeRepoFile('docs/secrets.md', 'Example: Bearer abcdefghijklmnopqrstuvwxyz123456\n');
     const run = createRunWithAgent({
@@ -345,7 +372,7 @@ describe('S006 shared evaluator', () => {
     ['unknown citations', { status: 'success', stdout: JSON.stringify({
       recommendation: 'likely_sufficient', confidence: 'high', summary: 'Advice', rationale: 'Unsupported advice',
       evidenceReferences: ['unknown.md']
-    }) }, 'evidenceReferences must include a manifest entry']
+    }) }, 'S006 requires exactly one coverage disposition for every supplied review obligation.']
   ] as Array<[string, Partial<CommandExecutionResult>, string]>)('preserves deterministic findings after OpenCode %s', async (_name, response, error) => {
     writeRepoFile('docs/secrets.md', 'Example: Bearer abcdefghijklmnopqrstuvwxyz123456\n');
     const run = createRunWithAgent({

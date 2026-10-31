@@ -118,13 +118,14 @@ describe('B011 agent review', () => {
   });
 
   it('shows why a rejected review was not applied', async () => {
-    const { result } = await evaluateWith(module(), fakeConfig({ evidenceReferences: ['.criterion-agent/B011/checklist.json'], assessments: [configuration(), settings()], reviewerActions: [action] }));
+    const { result } = await evaluateWith(module(), fakeConfig({ evidenceReferences: ['.criterion-agent/B011/checklist.json'],
+      assessments: [configuration({ evidenceReferences: [`${DB}/schema.json`] }), settings({ coverageDisposition: undefined })], reviewerActions: [] }));
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
     expect(result.agentReview?.available).toBe(false);
     expect(rowsFrom(result.details, 'Agent review:')).toEqual([
       'Agent review:',
-      '  - Not applied: Agent review requires repository evidence for the review and every assessment and action; generated context alone is not evidence.'
+      '  - Not applied: Agent review requires repository evidence: it cites no repository file, and generated context alone is not evidence.'
     ]);
   });
 

@@ -233,7 +233,35 @@ describe('F003 agent review', () => {
   });
 
   it.each([
-    ['review citations', { evidenceReferences: ['.criterion-agent/F003/checklist.json'] }, 'Agent review requires repository evidence for the review and every assessment and action; generated context alone is not evidence.'],
+    ['only generated context', ['.criterion-agent/F003/checklist.json']],
+    ['an unknown path', ['src/Elsewhere.js']],
+    ['nothing', []]
+  ])('drops the review\'s own sources when they cite %s and keeps the rest of the review', async (_name, evidenceReferences) => {
+    const result = await evaluateWith(fakeConfig({ evidenceReferences, assessments: [missingId(), hardCoded()], reviewerActions: [action] }));
+
+    expect(result.agentReview?.available).toBe(true);
+    expect(result.agentReview?.evidenceReferences).toEqual([]);
+    expect(checklistLines(result.details)).toEqual(['Checklist for the reviewer:', ...C1, ...missingIdRows, ...C2, ...hardCodedRows]);
+    expect(reviewLines(result.details).slice(-6)).toEqual([
+      '    - Add statusModal.cancel to en.json.',
+      '      - Sources:',
+      '        - translations/ui-checkin/en.json',
+      '  - Dropped from this review:',
+      '    - The review\'s own sources: None of them is a repository file.',
+      '  - Advisory only; the criterion status is unchanged.'
+    ]);
+  });
+
+  it('rejects a review whose own sources cite no repository file when no kept result or action does', async () => {
+    const result = await evaluateWith(fakeConfig({ evidenceReferences: ['.criterion-agent/F003/checklist.json'],
+      assessments: [missingId({ coverageDisposition: undefined }), hardCoded({ evidenceReferences: ['.criterion-agent/F003/checklist.json'] })], reviewerActions: [] }));
+
+    expect(result.agentReview?.available).toBe(false);
+    expect(result.details?.split('\n').slice(-2)).toEqual(['Agent review:',
+      '  - Not applied: Agent review requires repository evidence: it cites no repository file, and generated context alone is not evidence.']);
+  });
+
+  it.each([
     ['a recommendation', { recommendation: 'maybe' }, 'recommendation must be a supported advisory recommendation'],
     ['an assessments array', { assessments: { 'F003-C1#1': missingId() } }, 'Invalid or uncited assessments; the complete review was rejected.']
   ])('still rejects a review without %s, since there is no item to drop', async (_name, fields, error) => {

@@ -263,11 +263,21 @@ function validatePreparedReview(
     review,
     prepared.availableSourcePaths
   );
-  if (!citationValidated.available || !prepared.request.validateReview) return citationValidated;
-  const validationError = prepared.request.validateReview(citationValidated, prepared.availableSourcePaths);
-  return validationError
-    ? { ...citationValidated, available: false, errors: [...citationValidated.errors, validationError] }
-    : citationValidated;
+  if (!citationValidated.available) return citationValidated;
+  const validationError = prepared.request.validateReview?.(citationValidated, prepared.availableSourcePaths);
+  if (validationError) {
+    return { ...citationValidated, available: false, errors: [...citationValidated.errors, validationError] };
+  }
+  const cited = (citations: string[]) => citesAny(citations, prepared.availableSourcePaths);
+  return cited(citationValidated.evidenceReferences)
+    || (citationValidated.assessments ?? []).some(item => cited(item.evidenceReferences) || (item.failureBounds ?? []).some(bound => cited(bound.evidenceReferences)))
+    || (citationValidated.reviewerActions ?? []).some(item => cited(item.evidenceReferences))
+    ? citationValidated
+    : { ...citationValidated, available: false, errors: [...citationValidated.errors, 'Agent review requires repository evidence: it cites no repository file, and generated context alone is not evidence.'] };
+}
+
+function citesAny(citations: string[], availableSourcePaths: ReadonlySet<string>): boolean {
+  return citations.some(citation => availableSourcePaths.has(citation));
 }
 
 function validateRepositoryCitations(
@@ -276,7 +286,7 @@ function validateRepositoryCitations(
   availableSourcePaths: ReadonlySet<string>
 ): CriterionAgentReviewResult {
   if (!request.repositoryBrowsing || !review.available) return review;
-  const cited = (citations: string[]) => citations.some(citation => availableSourcePaths.has(citation));
+  const cited = (citations: string[]) => citesAny(citations, availableSourcePaths);
   const citedGenerated = (item: CriterionAgentAssessment) => (request.generatedEvidencePaths ?? []).some(generated =>
     generated.technologyIds.includes(item.technologyId) && item.evidenceReferences.includes(generated.path) && (generated.accepts?.(item) ?? true));
   const citedAssessment = (item: CriterionAgentAssessment) => (citedGenerated(item) || cited(item.evidenceReferences))
@@ -284,16 +294,19 @@ function validateRepositoryCitations(
   const citedAction = (item: CriterionAgentReviewerAction) => cited(item.evidenceReferences);
   const assessments = review.assessments ?? [];
   const actions = review.reviewerActions ?? [];
-  if (!cited(review.evidenceReferences) || (!request.dropInvalidItems && (!assessments.every(citedAssessment) || !actions.every(citedAction)))) {
-    return { ...review, available: false, errors: [...review.errors, 'Agent review requires repository evidence for the review and every assessment and action; generated context alone is not evidence.'] };
+  if (!request.dropInvalidItems && (!assessments.every(citedAssessment) || !actions.every(citedAction))) {
+    return { ...review, available: false, errors: [...review.errors, 'Agent review requires repository evidence for every assessment and action; generated context alone is not evidence.'] };
   }
   const reason = 'It cites only generated context, not a repository file.';
+  const citedReview = cited(review.evidenceReferences);
   const dropped: CriterionAgentDroppedItem[] = [
     ...assessments.filter(item => !citedAssessment(item)).map(item => ({ kind: 'assessment' as const, technologyId: item.technologyId, reason })),
-    ...actions.filter(item => !citedAction(item)).map(() => ({ kind: 'reviewer_action' as const, reason }))
+    ...actions.filter(item => !citedAction(item)).map(() => ({ kind: 'reviewer_action' as const, reason })),
+    ...citedReview ? [] : [{ kind: 'evidence_references' as const, reason: 'None of them is a repository file.' }]
   ];
   return dropped.length ? {
     ...review,
+    evidenceReferences: citedReview ? review.evidenceReferences : [],
     assessments: review.assessments?.filter(citedAssessment),
     reviewerActions: review.reviewerActions?.filter(citedAction),
     droppedItems: [...review.droppedItems ?? [], ...dropped]
@@ -544,7 +557,6 @@ export function normalizeCriterionAgentAdvisoryPayload(
   if (!summary) errors.push('summary must be a nonblank string');
   if (!rationale) errors.push('rationale must be a nonblank string');
   if (!Array.isArray(payload.evidenceReferences)) errors.push('evidenceReferences must be an array');
-  else if (!evidenceReferences.length) errors.push('evidenceReferences must include a manifest entry');
   if (payload.assessments !== undefined && (!Array.isArray(payload.assessments) || (!dropInvalidItems && assessments?.length !== payload.assessments.length))) {
     errors.push('Invalid or uncited assessments; the complete review was rejected.');
   }

@@ -26,6 +26,8 @@ export async function reviewS004WithAgent(
       'recommendation must be one of likely_sufficient, likely_insufficient, or needs_reviewer_judgment; confidence must be low, medium, or high; summary and rationale must be strings; evidenceReferences must be an array of repoRelativePath strings only.'
     ].join('\n'),
     files: [{ repoRelativePath: '.criterion-agent/S004/deterministic-summary.json', content: JSON.stringify(result, null, 2) }],
+    validateReview: (review: CriterionAgentReviewResult) => review.evidenceReferences.length ? undefined
+      : 'S004 agent review requires repository evidence in its own evidenceReferences; generated context alone is not evidence.',
     schemaDescription: 'JSON object with recommendation enum, confidence enum, summary string, rationale string, evidenceReferences string[]'
   };
   return runCriterionAgentReview(request, config, commandRunner);

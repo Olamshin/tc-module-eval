@@ -89,6 +89,11 @@ export function renderAgentReviewLines(
       );
     }
   }
+  if (review.droppedItems?.length) {
+    lines.push('  - Dropped from this review:', ...review.droppedItems.map(item => `    - ${item.kind === 'evidence_references' ? 'The review\'s own sources'
+      : item.kind === 'reviewer_action' ? 'A reviewer action'
+        : !item.technologyId ? 'A result without an ID' : `A result for ${reportText(item.technologyId)}`}: ${reportText(item.reason)}`));
+  }
   if (review.evidenceReferences.length) {
     lines.push('  - Sources:', ...review.evidenceReferences.map(reference => `    - ${reportPath(reference)}`));
   }
