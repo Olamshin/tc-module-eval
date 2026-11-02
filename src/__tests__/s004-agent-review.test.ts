@@ -103,6 +103,22 @@ describe('S004 agent review', () => {
     }
   });
 
+  it('rejects a review whose own sources cite no repository file, even with a cited reviewer action it was not asked for', async () => {
+    fs.writeFileSync(path.join(repoPath, 'README.md'), '# module');
+    execFileSync('git', ['init', '-q'], { cwd: repoPath });
+    execFileSync('git', ['add', '.'], { cwd: repoPath });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture'], { cwd: repoPath });
+
+    const result = await reviewS004WithAgent(repoPath, documentationResult(), { enabled: true, enabledCriteria: ['S004'], adapter: 'fake', fakeResult: {
+      available: true, criterionId: 'S004', recommendation: 'likely_insufficient', confidence: 'medium', summary: 'No run steps.', rationale: 'Only a title.',
+      evidenceReferences: ['.criterion-agent/S004/deterministic-summary.json'],
+      reviewerActions: [{ action: 'Ask for run instructions.', evidenceReferences: ['README.md'] }], warnings: [], errors: []
+    } });
+
+    expect(result.available).toBe(false);
+    expect(result.errors).toEqual(['S004 agent review requires repository evidence in its own evidenceReferences; generated context alone is not evidence.']);
+  });
+
   function documentationResult(): S004InstallationDocumentationResult {
     return {
       candidates: [{

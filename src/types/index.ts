@@ -267,7 +267,10 @@ export interface CriterionAgentReviewResult {
   evidenceReferences: string[];
   assessments?: CriterionAgentAssessment[];
   reviewerActions?: CriterionAgentReviewerAction[];
-  /** Assessments and reviewer actions left out of an accepted review, for criteria that drop invalid items one by one. */
+  /**
+   * Assessments and reviewer actions left out of an accepted review, for criteria that drop invalid items one by one,
+   * and the review's own evidenceReferences when they cite no repository file.
+   */
   droppedItems?: CriterionAgentDroppedItem[];
   /** The agent's own recommendation when it disagreed with the kept assessments and was replaced. */
   replacedRecommendation?: { recommendation: CriterionAgentRecommendation; reason: string };
@@ -277,7 +280,7 @@ export interface CriterionAgentReviewResult {
 }
 
 export interface CriterionAgentDroppedItem {
-  kind: 'assessment' | 'reviewer_action';
+  kind: 'assessment' | 'reviewer_action' | 'evidence_references';
   /** The assessment's technologyId, when it had one. */
   technologyId?: string;
   /** Why it was dropped, in plain English. */

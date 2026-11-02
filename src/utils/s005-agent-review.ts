@@ -60,6 +60,8 @@ export async function buildS005AgentReviewRequest(
         warnings: analysis.warnings
       }, null, 2), MAX_S005_EVIDENCE_TEXT_BYTES_PER_FILE)
     }],
+    validateReview: (review: CriterionAgentReviewResult) => review.evidenceReferences.length ? undefined
+      : 'S005 agent review requires repository evidence in its own evidenceReferences; generated context alone is not evidence.',
     schemaDescription: 'JSON object with recommendation enum, confidence enum, nonblank summary and rationale, nonempty repository evidenceReferences string[]'
   };
 }

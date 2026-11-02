@@ -144,7 +144,6 @@ describe('S007 agent review', () => {
   });
 
   it.each([
-    ['top-level', ['.criterion-agent/S007/deterministic-summary.json'], [{ technologyId: 'react', type: 'aligned_fact', summary: 'Claim.', evidenceReferences: ['package.json'] }], undefined],
     ['nested assessment', ['package.json'], [{ technologyId: 'react', type: 'aligned_fact', summary: 'Claim.', evidenceReferences: ['.criterion-agent/S007/policy-context.json'] }], undefined],
     ['nested action', ['package.json'], [{ technologyId: 'react', type: 'policy_question', summary: 'Question.', evidenceReferences: ['package.json'] }], [{ action: 'Resolve policy applicability.', evidenceReferences: ['.criterion-agent/S007/policy-context.json'] }]]
   ])('rejects generated-only %s evidence', async (_name, evidenceReferences, assessments, reviewerActions) => {

@@ -93,21 +93,6 @@ describe('S006 agent review adapter', () => {
     expect(analysis.classification.status).toBe(EvaluationStatus.MANUAL);
   });
 
-  it('rejects generated-only citations as lacking repository evidence', async () => {
-    writeFile('README.md', '# module');
-    commit();
-    const clean = await analyzeRepo();
-    const analysis: S006SensitiveInformationAnalysisResult = { ...clean,
-      classification: { ...clean.classification, status: EvaluationStatus.MANUAL, materiallyWeakenedCoverage: true },
-      coverage: { ...clean.coverage, complete: false, materiallyWeakened: true }
-    };
-    const result = await reviewS006WithAgent(repoPath, analysis, fakeConfig({
-      ...baseResult(), evidenceReferences: ['.criterion-agent/S006/finding-summary.json']
-    }));
-    expect(result.available).toBe(false);
-    expect(result.errors.join('\n')).toContain('requires repository evidence');
-  });
-
   it('requires repository citations for every assessment and reviewer action', async () => {
     writeFile('docs/token.md', 'Example: Bearer abcdefghijklmnopqrstuvwxyz123456');
     commit();

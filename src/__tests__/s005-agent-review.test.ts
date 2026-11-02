@@ -107,15 +107,19 @@ describe('S005 agent review adapter', () => {
     expect(analysis.classification.status).toBe(EvaluationStatus.MANUAL);
   });
 
-  it('rejects generated-only citations as lacking repository evidence', async () => {
+  it.each([
+    ['nothing else', undefined],
+    ['a cited reviewer action it was not asked for', [{ action: 'Check the schema.', evidenceReferences: ['schemas/user.json'] }]]
+  ])('rejects generated-only citations as lacking repository evidence, with %s', async (_name, reviewerActions) => {
     writeCompletedDisclosure();
+    writeFile('schemas/user.json', '{"email":"string"}');
     commit();
     const analysis = analyzeS005PersonalDataDisclosure(repoPath);
     const result = await reviewS005WithAgent(repoPath, analysis, fakeConfig({
-      ...baseResult(), evidenceReferences: ['.criterion-agent/S005/parsed-disclosure-summary.json']
+      ...baseResult(), evidenceReferences: ['.criterion-agent/S005/parsed-disclosure-summary.json'], reviewerActions
     }));
     expect(result.available).toBe(false);
-    expect(result.errors.join('\n')).toContain('requires repository evidence');
+    expect(result.errors).toEqual(['S005 agent review requires repository evidence in its own evidenceReferences; generated context alone is not evidence.']);
   });
 
   it('preserves unavailable output for malformed advisory JSON', async () => {

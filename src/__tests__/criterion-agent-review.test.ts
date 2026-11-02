@@ -169,7 +169,37 @@ describe('criterion agent review', () => {
 
     expect(repository).toMatchObject({ available: true, evidenceReferences: ['src.ts'] });
     expect(supplied.available).toBe(false);
-    expect(supplied.errors.join(' ')).toContain('incomplete advisory JSON');
+    expect(supplied.errors).toEqual(['Agent review requires repository evidence: it cites no repository file, and generated context alone is not evidence.']);
+  });
+
+  const bound = (evidenceReferences: string[]) => ['startup', 'tenant_initialization', 'runtime'].map(phase => ({
+    phase, requirement: 'required', status: 'unverified', explanation: 'Not traced.', evidenceReferences }));
+  it.each([
+    ['a reviewer action', [], [{ action: 'Check src.ts.', evidenceReferences: ['src.ts'] }], true],
+    ['an assessment', [{ technologyId: 'gap:x', type: 'evidence_gap', summary: 'Open.', evidenceReferences: ['src.ts'] }], [], true],
+    ['a failure bound', [{ technologyId: 'gap:x', type: 'evidence_gap', summary: 'Open.', evidenceReferences: ['.criterion-agent/S999/starting.json'], failureBounds: bound(['src.ts']) }], [], true],
+    ['only generated context', [{ technologyId: 'gap:x', type: 'evidence_gap', summary: 'Open.', evidenceReferences: ['.criterion-agent/S999/starting.json'] }], [], false]
+  ])('drops the review\'s own sources when they cite no repository file, and keeps the review only when %s cites one', async (_name, assessments, reviewerActions, kept) => {
+    fs.writeFileSync(path.join(repoPath, 'src.ts'), 'committed source');
+    execFileSync('git', ['init', '-q'], { cwd: repoPath });
+    execFileSync('git', ['add', '.'], { cwd: repoPath });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture'], { cwd: repoPath });
+    const review = await runCriterionAgentReviewImpl({
+      criterionId: 'S999', repositoryPath: repoPath, instructions: 'review',
+      files: [{ repoRelativePath: '.criterion-agent/S999/starting.json', content: '{}' }],
+      generatedEvidencePaths: [{ path: '.criterion-agent/S999/starting.json', technologyIds: ['gap:x'] }],
+      schemaDescription: 'schema'
+    }, { enabled: true, adapter: 'fake', fakeResult: {
+      available: true, criterionId: 'S999', recommendation: 'needs_reviewer_judgment', confidence: 'medium', summary: 'S.', rationale: 'R.',
+      evidenceReferences: ['.criterion-agent/S999/starting.json', 'missing.ts'], assessments, reviewerActions, warnings: [], errors: []
+    } as unknown as CriterionAgentReviewConfig['fakeResult'] });
+
+    expect(review).toMatchObject(kept ? {
+      available: true, evidenceReferences: [], assessments, reviewerActions,
+      droppedItems: [{ kind: 'evidence_references', reason: 'None of them is a repository file.' }], errors: []
+    } : {
+      available: false, errors: ['Agent review requires repository evidence: it cites no repository file, and generated context alone is not evidence.']
+    });
   });
 
   it('reads committed source once for all of a run\'s reviews', async () => {
@@ -272,8 +302,7 @@ describe('criterion agent review', () => {
   it.each([
     ['summary', '  '], ['rationale', '\n'], ['recommendation', 'maybe'],
     ['confidence', -0.01], ['confidence', 1.01], ['confidence', NaN], ['confidence', Infinity],
-    ['evidenceReferences', undefined], ['evidenceReferences', 'README.md'],
-    ['evidenceReferences', []], ['evidenceReferences', ['unknown.md']]
+    ['evidenceReferences', undefined], ['evidenceReferences', 'README.md']
   ])('rejects invalid %s (%p) in shared normalization', (field, value) => {
     const normalized = normalizeCriterionAgentAdvisoryPayload({
       recommendation: 'pass', confidence: 0.75, summary: 'Evidence checked.',

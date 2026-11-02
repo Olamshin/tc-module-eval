@@ -96,18 +96,13 @@ export function renderFrontendAgentReviewLines(checklist: FrontendChecklist, rev
     const match = /^discovered:([a-z]+):(\d+)$/.exec(assessment.technologyId);
     return match && DISCOVERED_KIND_NAMES[match[1]] ? [[`${match[1]}:${match[2]}`, `${DISCOVERED_KIND_NAMES[match[1]]} (${match[2]})`]] : [];
   }));
-  const lines = renderAgentReviewLines({ ...review, assessments: unattached }, names);
+  const given = new Set(checklist.items.filter(item => !item.reviewerOnly)
+    .flatMap(item => item.obligations.filter(obligation => !obligation.withheld).map(obligation => obligation.id)));
+  const lines = renderAgentReviewLines({ ...review, assessments: unattached,
+    droppedItems: review.droppedItems?.filter(item => item.kind !== 'assessment' || !given.has(item.technologyId ?? '')) }, names);
   const replaced = review.replacedRecommendation;
   const recommendation = lines.findIndex(line => line.startsWith('  - Recommendation: '));
   if (replaced) lines[recommendation] += ` — the agent recommended "${RECOMMENDATION_LABELS[replaced.recommendation]}", but ${reportText(replaced.reason)}.`;
-  const given = new Set(checklist.items.filter(item => !item.reviewerOnly)
-    .flatMap(item => item.obligations.filter(obligation => !obligation.withheld).map(obligation => obligation.id)));
-  const dropped = (review.droppedItems ?? []).filter(item => item.kind === 'reviewer_action' || !given.has(item.technologyId ?? ''));
-  if (dropped.length) {
-    const sources = lines.indexOf('  - Sources:');
-    lines.splice(sources < 0 ? lines.length : sources, 0, '  - Dropped from this review:', ...dropped.map(item => `    - ${item.kind === 'reviewer_action'
-      ? 'A reviewer action' : !item.technologyId ? 'A result without an ID' : `A result for ${reportText(item.technologyId)}`}: ${reportText(item.reason)}`));
-  }
   return [...lines, '  - Advisory only; the criterion status is unchanged.'];
 }
 
