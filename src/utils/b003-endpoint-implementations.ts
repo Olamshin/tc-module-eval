@@ -165,7 +165,9 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
   }
   if (fromLibrary.length) {
     const names = unique(fromLibrary.map(endpoint => endpoint.library!));
-    sentences.push(`${share(fromLibrary.length)} ${fromLibrary.length === 1 ? 'comes' : 'come'} from ${listText(names)}, which implements ${fromLibrary.length === 1 ? 'it' : 'them'}: ${labels(fromLibrary)}.`);
+    sentences.push(`${share(fromLibrary.length)} ${fromLibrary.length === 1 ? 'comes' : 'come'} from ${listText(names)}. The tool does not look inside `
+      + `${names.length === 1 ? 'that library' : 'those libraries'}, so it cannot confirm that the version the module uses implements `
+      + `${fromLibrary.length === 1 ? 'it' : 'them'}: ${labels(fromLibrary)}.`);
   }
   if (partial.length) {
     sentences.push(`${share(partial.length)} ${verb(partial.length)} found only for fixed values of a path parameter: ${labels(partial)}.`);

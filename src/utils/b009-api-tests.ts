@@ -166,7 +166,11 @@ export function evaluateB009(inputs: B009Inputs): B009Analysis {
   }
   const problems: string[] = [];
   if (unread.length) problems.push('The tool could not read every file in the repository that would show API tests.');
-  if (integrationTests?.outcome === 'unread') problems.push(`folio-integration-tests could not be checked: ${reportText(integrationTests.problem ?? '')}`);
+  const lookupFailed = integrationTests?.outcome === 'unread';
+  if (lookupFailed) {
+    problems.push(`The tool could not look in folio-integration-tests: ${reportText(integrationTests.problem ?? '')} `
+      + 'B009 is manual because of this lookup, not because API tests are missing or failing.');
+  }
   const unclear = suites.filter(suite => suite.support === 'unclear');
   const emptyFolder = integrationTests?.outcome === 'folder' && integrationTests.featureFileCount === 0;
   if (unclear.length || emptyFolder) {
@@ -179,7 +183,7 @@ export function evaluateB009(inputs: B009Inputs): B009Analysis {
       [...(supported.length ? [foundText(supported, integrationTests?.folder)] : []), ...sentences, ...problems, 'A reviewer must check which framework the API tests use.'].join(' '));
   }
   if (problems.length) {
-    return result(EvaluationStatus.MANUAL, 'incomplete', [...(found ? [found] : []), ...problems, 'A reviewer must check the module\'s API tests.'].join(' '));
+    return result(EvaluationStatus.MANUAL, 'incomplete', [...(found ? [found] : []), ...problems, `A reviewer or an agent must check the module's API tests${lookupFailed ? ', including folio-integration-tests' : ''}.`].join(' '));
   }
   if (suites.length) {
     return result(EvaluationStatus.PASS, 'karate', [

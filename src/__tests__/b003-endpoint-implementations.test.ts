@@ -427,7 +427,7 @@ describe('B003 endpoint implementations', () => {
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
     expect(result.evidence).toBe('B003 manual: 1 of the 2 endpoints in the module descriptor has a wildcard path, which the tool cannot match to an implementation: GET /example/*. '
-      + '1 of the 2 endpoints in the module descriptor comes from folio-custom-fields, which implements it: GET /custom-fields/{id}. A reviewer must check them.');
+      + '1 of the 2 endpoints in the module descriptor comes from folio-custom-fields. The tool does not look inside that library, so it cannot confirm that the version the module uses implements it: GET /custom-fields/{id}. A reviewer must check them.');
     expect(analysis.checklist.items.map(item => [item.id, item.reviewerOnly, item.startingPoints])).toEqual([
       ['B003-C1', false, [{ path: 'descriptors/ModuleDescriptor-template.json', line: 25, note: 'GET /example/*: a wildcard path' }]],
       ['B003-C2', true, [{ path: 'pom.xml', line: 3, note: 'GET /custom-fields/{id}: served by folio-custom-fields' }]]

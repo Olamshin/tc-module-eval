@@ -175,7 +175,7 @@ export interface BackendApiSpecs {
  * Where B006 found an endpoint:
  * - `openapi`: in an OpenAPI or Swagger spec;
  * - `raml`: only in a RAML spec;
- * - `library`: not in the repository's specs, and served by a library whose own spec documents it;
+ * - `library`: not in the repository's specs, and served by a library, whose spec the tool does not read;
  * - `partial`: documented only for fixed values of a path parameter, such as `/erm/jobs/packageImport` for
  *   `/erm/jobs/{type}`;
  * - `unconfirmed`: not found, but part of a spec, or the source, could not be read;
