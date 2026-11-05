@@ -594,7 +594,7 @@ describe('B003 endpoint implementations', () => {
         { method: 'GET', path: '/items/*', interfaceId: 'items', implementation: 'wildcard', specFiles: [] }
       ] });
       expect([...prepared.availableSourcePaths].sort()).toEqual([TEMPLATE, 'pom.xml', 'ramls/items.raml']);
-      expect(prepared.request.defaultTimeoutMs).toBe(600_000);
+      expect(prepared.request.defaultTimeoutMs).toBe(900_000);
     });
   });
 });

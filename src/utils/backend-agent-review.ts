@@ -5,7 +5,7 @@ import { isSystemInterface } from './descriptor-handlers';
 import { buildFrontendAgentReviewRequest, FrontendAgentReviewOptions, FrontendChecklistItemDraft, numberObligations } from './frontend-agent-review';
 import { isRecord } from './type-guards';
 
-export const BACKEND_AGENT_TIMEOUT_MS = 600_000;
+export const BACKEND_AGENT_TIMEOUT_MS = 900_000;
 
 const BROWSED = [
   /(?:^|\/)src\/main\/(?:java|groovy|kotlin|resources)\//,

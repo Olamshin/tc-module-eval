@@ -320,7 +320,7 @@ describe('F003 agent review', () => {
   });
 
   it.each([
-    [undefined, 420_000],
+    [undefined, 900_000],
     [90_000, 90_000]
   ])('times each OpenCode command out after the F00x default unless a timeout is given (%s)', async (timeoutMs, expected) => {
     const runner = new TimedOutRunner();

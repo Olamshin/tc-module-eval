@@ -11,7 +11,7 @@ import { FRONTEND_AGENT_OBLIGATION_LIMIT, SHOWN_STARTING_POINTS } from './fronte
 import { isComponentCssPath, isProductionSourcePath } from './frontend-source';
 
 /** F00x reviews wait for the model longer than the shared 120 s default; ui-checkin's S010 review took 158 s. */
-export const FRONTEND_AGENT_TIMEOUT_MS = 420_000;
+export const FRONTEND_AGENT_TIMEOUT_MS = 900_000;
 
 const EVIDENCE_SUMMARY_BYTES = 48 * 1024;
 

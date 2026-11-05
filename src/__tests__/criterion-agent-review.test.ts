@@ -23,6 +23,7 @@ import { sanitizeStructuredOutput } from '../utils/opencode-output';
 import { LocalCommandRunner } from '../utils/command-runner';
 import { createEvaluationRun } from '../utils/evaluation-run';
 import { EVALUATOR_SECRETS, withEvaluatorSecrets } from './helpers/evaluator-secrets';
+import { resetLogger, setLogger } from '../utils/logger';
 
 const FAIL_PROMPT = 'The tool failed this criterion on its own findings, and that status stands. For each failure, explain in plain words what the module does, which rule it breaks, and what the module team must change, so a reviewer who has not read the code can follow it. Confirm each failure from the source; when one looks like an analyzer mistake, say so and cite the evidence. Use likely_sufficient only when every failure looks like an analyzer mistake.';
 
@@ -858,6 +859,62 @@ describe('criterion agent review', () => {
     }, { ...opencodeConfig(), timeoutMs }, runner);
 
     expect(runner.requests.map(request => request.timeoutMs)).toEqual([expected, expected, expected, expected]);
+  });
+
+  it('stops a review that writes nothing for 5 minutes and says it stalled', async () => {
+    const runner = new FakeRunner(undefined, undefined, undefined, {
+      4: { status: 'timed_out', idleTimedOut: true, durationMs: 300_412, stdout: '{"type":"step_start"}\n', stdoutBytes: 22, firstStdoutMs: 300, lastStdoutMs: 412,
+        errorMessage: 'Command wrote no output for 300000ms, so it was stopped before its 600000ms timeout' }
+    });
+    const result = await runCriterionAgentReview({ criterionId: 'S004', repositoryPath: repoPath,
+      instructions: 'review', files: [{ repoRelativePath: 'README.md', content: 'Evidence' }], schemaDescription: 'schema'
+    }, opencodeConfig(), runner);
+
+    expect(runner.requests.map(request => request.idleTimeoutMs)).toEqual([undefined, undefined, undefined, 300_000]);
+    expect(result.available).toBe(false);
+    expect(result.errors).toEqual(['OpenCode run: 300412ms elapsed; timeout 600000ms; model test-model; stdout 22 bytes; stderr unknown bytes; stalled; '
+      + 'Command wrote no output for 300000ms, so it was stopped before its 600000ms timeout',
+      'OpenCode run diagnosis: silent for 300.0 s after the last event (likely waiting on the provider); first output after 0.3 s; last output 300.0 s before the stop; '
+        + 'events 1; steps started 1, finished 0; no tool calls; no answer text; last event step_start']);
+  });
+
+  it('logs a heartbeat of the review\'s steps and tool calls while it runs, and none after it ends', async () => {
+    const logged: string[] = [];
+    setLogger({ info: (...args) => logged.push(args.join(' ')), warn: () => {}, error: () => {}, debug: () => {} });
+    jest.useFakeTimers();
+    class StreamingRunner extends FakeRunner {
+      async run(request: CommandExecutionRequest): Promise<CommandExecutionResult> {
+        if (request.onStdout) {
+          const events = Buffer.from([
+            '{"type":"step_start"}',
+            '{"type":"tool_use","part":{"tool":"read","state":{"status":"completed","title":"café"}}}',
+            '{"type":"tool_use","part":{"tool":"read","state":{"status":"completed"}}}',
+            '{"type":"step_finish"}',
+            '{"type":"step_start"}',
+            '{"type":"tool_use","part":{"tool":"grep","state":{"status":"completed"}}}',
+            ''
+          ].join('\n'));
+          // Chunks split inside the two-byte "é" and inside a line.
+          const split = events.indexOf(Buffer.from('é')) + 1;
+          request.onStdout(events.subarray(0, split));
+          request.onStdout(events.subarray(split, split + 40));
+          request.onStdout(events.subarray(split + 40));
+          jest.advanceTimersByTime(30_000);
+        }
+        return super.run(request);
+      }
+    }
+    try {
+      await runCriterionAgentReview({ criterionId: 'S004', repositoryPath: repoPath,
+        instructions: 'review', files: [{ repoRelativePath: 'README.md', content: 'Evidence' }], schemaDescription: 'schema'
+      }, { ...opencodeConfig(), timeoutMs: 180000 }, new StreamingRunner());
+      jest.advanceTimersByTime(90_000);
+    } finally {
+      jest.useRealTimers();
+      resetLogger();
+    }
+
+    expect(logged).toEqual(['   ⏳ S004 agent review: 30s of 3m 00s; 2 model steps, 3 tool calls (last: grep); last output 30s ago']);
   });
 
   it.each([1, 2, 4])('rejects capture truncation at stage %i even with a valid prefix', async stage => {

@@ -173,7 +173,7 @@ describe('backend agent review contract', () => {
     });
 
     it.each([
-      [undefined, 600_000],
+      [undefined, 900_000],
       [90_000, 90_000]
     ])('times each OpenCode command out after 600 s unless a timeout is given (%s)', async (timeoutMs, expected) => {
       const runner = new TimedOutRunner();

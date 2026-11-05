@@ -181,6 +181,29 @@ describe('CommandRunner', () => {
     expect([silent.firstStdoutMs, silent.lastStdoutMs]).toEqual([undefined, undefined]);
   });
 
+  it('stops a command that goes quiet for the idle timeout, counting output on either stream as activity', async () => {
+    const runner = new LocalCommandRunner(true);
+    // One stdout write, then stderr alone for about 0.9 s, longer than the idle limit, then quiet.
+    const child = 'let n = 0; const t = setInterval(() => { (n ? process.stderr : process.stdout).write("x"); if (++n === 12) clearInterval(t); }, 80); setTimeout(() => {}, 20000)';
+    const result = await runner.run({ command: 'node', args: ['-e', child], cwd: process.cwd(), timeoutMs: 15000, idleTimeoutMs: 500 });
+
+    expect(result.status).toBe('timed_out');
+    expect(result.idleTimedOut).toBe(true);
+    expect(result.stdout).toBe('x');
+    expect(result.errorMessage).toBe('Command wrote no output for 500ms, so it was stopped before its 15000ms timeout: xxxxxxxxxxx');
+  });
+
+  it('leaves the overall timeout to report a command that keeps writing', async () => {
+    const runner = new LocalCommandRunner(true);
+    const result = await runner.run({
+      command: 'node', args: ['-e', 'setInterval(() => process.stdout.write("x"), 20)'], cwd: process.cwd(), timeoutMs: 300, idleTimeoutMs: 250
+    });
+
+    expect(result.status).toBe('timed_out');
+    expect(result.idleTimedOut).toBeUndefined();
+    expect(result.errorMessage).toContain('Command timed out after 300ms');
+  });
+
   it('should force-complete timed out commands that ignore SIGTERM', async () => {
     const runner = new LocalCommandRunner(true);
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'command-runner-'));

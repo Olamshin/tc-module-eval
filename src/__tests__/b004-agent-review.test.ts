@@ -157,7 +157,7 @@ describe('B004 agent review', () => {
     }, runner);
 
     expect(review.available).toBe(false);
-    expect(runner.timeouts).toEqual([600_000]);
+    expect(runner.timeouts).toEqual([900_000]);
   });
 });
 
