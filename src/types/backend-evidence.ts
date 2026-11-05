@@ -236,7 +236,7 @@ export interface B006Analysis {
  * - `interface`: in an API spec, and a committed class implements the interface the build generates for it;
  * - `route`: a route the source registers serves it;
  * - `no-implementing-class`: in an API spec, but no committed class implements the interface the build generates;
- * - `wildcard`: a handler path with Okapi's `*`, whose paths the tool cannot list;
+ * - `wildcard`: a handler path with Okapi's `*` that no API spec operation or route falls under;
  * - `library`: served by a library;
  * - `partial`: found only for fixed values of a path parameter, such as `/erm/jobs/packageImport` for `/erm/jobs/{type}`;
  * - `unconfirmed`: not found, but part of a spec, a route or the source could not be read;

@@ -110,7 +110,6 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
       ({ method, path: endpointPath, ...(interfaceId ? { interfaceId } : {}), implementation, specFiles, ...extra });
     const location = (item: { file: string; line: number }) => ({ file: item.file, line: item.line });
 
-    if (matcher.wildcard) return found('wildcard', []);
     const spec = lookup(specIndex, matcher);
     const specFiles = unique([...(specFile ? [specFile] : []), ...spec.documented.map(entry => entry.file)]);
     const names = unique(spec.documented.flatMap(generated));
@@ -121,6 +120,8 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
     if (names.length) return found('no-implementing-class', specFiles, { generatedInterfaces: names });
     const library = libraries.find(candidate => candidate.path.test(endpointPath));
     if (library) return found('library', specFiles, { library: library.artifactId });
+    // A wildcard handler is implemented by an implemented operation or route under it; with nothing under it, it is not a fail.
+    if (matcher.wildcard) return found('wildcard', specFiles);
     if (spec.partial.length || (routes.partial.length && !scan.unreadRouteCount)) {
       return found('partial', unique(spec.partial.map(entry => entry.file)), routes.partial.length ? { implementedBy: routes.partial.map(location) } : {});
     }
@@ -161,7 +162,7 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
     sentences.push(`${share(unrouted.length)} ${verb(unrouted.length)} in an API spec, but no route in the source serves ${unrouted.length === 1 ? 'it' : 'them'}: ${labels(unrouted)}.`);
   }
   if (wildcards.length) {
-    sentences.push(`${share(wildcards.length)} ${wildcards.length === 1 ? 'has a wildcard path' : 'have wildcard paths'}, which the tool cannot match to an implementation: ${labels(wildcards)}.`);
+    sentences.push(`${share(wildcards.length)} ${wildcards.length === 1 ? 'has a wildcard path' : 'have wildcard paths'} with no API spec operation or route under ${wildcards.length === 1 ? 'it' : 'them'}: ${labels(wildcards)}.`);
   }
   if (fromLibrary.length) {
     const names = unique(fromLibrary.map(endpoint => endpoint.library!));
@@ -203,7 +204,7 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
   for (const endpoint of unspecified) point(endpoint, template.path, 'in no API spec and no route', handlerLine(endpoint));
   for (const endpoint of noClass) point(endpoint, endpoint.specFiles[0], `no committed class implements it through ${listText(endpoint.generatedInterfaces!)}`);
   for (const endpoint of unrouted) point(endpoint, endpoint.specFiles[0], 'no route in the source serves it');
-  for (const endpoint of wildcards) point(endpoint, template.path, 'a wildcard path', handlerLine(endpoint));
+  for (const endpoint of wildcards) point(endpoint, template.path, 'a wildcard path with no API spec operation or route under it', handlerLine(endpoint));
   for (const endpoint of fromLibrary) {
     const library = libraries.find(candidate => candidate.artifactId === endpoint.library)!;
     libraryPoints.push({ path: library.buildFile, ...(library.line ? { line: library.line } : {}), note: `${endpoint.method} ${endpoint.path}: served by ${endpoint.library}` });
