@@ -21,6 +21,8 @@ import { redactEvaluatorSecrets, truncateToByteBudget } from './redaction';
 import { errorMessage, isRecord } from './type-guards';
 
 const MAX_AGENT_REVIEW_FILE_BYTES = 96 * 1024;
+// An S010 review of mod-users needs more than 28 model steps, which takes longer than the command runner's 120 s default.
+const CRITERION_AGENT_TIMEOUT_MS = 600_000;
 
 /** A technologyId the agent adds for something the analyzer missed: discovered:<normalized-id>. */
 export const DISCOVERED_TECHNOLOGY_ID = /^discovered:[a-z0-9][a-z0-9._-]*$/;
@@ -98,14 +100,14 @@ export interface OptionalCriterionAgentReviewResult {
  */
 export const AGENT_REVIEW_CRITERIA: ReadonlyMap<string, { optInOnly: boolean }> = new Map([
   ...['S004', 'S005', 'S006', 'S007', 'S010', 'S011', 'F001', 'F002', 'F003', 'F004', 'F006', 'F007',
-    'B004', 'B007', 'B010', 'B011', 'B013', 'B015'].map((id): [string, { optInOnly: boolean }] => [id, { optInOnly: false }]),
+    'B003', 'B004', 'B007', 'B010', 'B011', 'B013', 'B015'].map((id): [string, { optInOnly: boolean }] => [id, { optInOnly: false }]),
   ...['B002', 'B008', 'B012'].map((id): [string, { optInOnly: boolean }] => [id, { optInOnly: true }])
 ]);
 
 export async function reviewCriterionWithAgent(
   request: OptionalCriterionAgentReviewRequest
 ): Promise<OptionalCriterionAgentReviewResult> {
-  if (request.status !== EvaluationStatus.MANUAL) {
+  if (request.status !== EvaluationStatus.MANUAL && request.status !== EvaluationStatus.FAIL) {
     return {};
   }
   if (!request.hasReviewMaterial) {
@@ -125,6 +127,7 @@ export async function reviewCriterionWithAgent(
   const run = request.evaluationRun;
   const config: CriterionAgentReviewConfig = {
     ...request.evaluationRun.agentReview,
+    deterministicStatus: request.status,
     readRepositorySnapshot: () => run.getOrCreateArtifact('agentReviewSnapshot', () => readRepositorySnapshot(run.repositoryPath))
   };
   let agentReview: CriterionAgentReviewResult;
@@ -166,8 +169,8 @@ export async function runCriterionAgentReview(
     return { ...unavailable, errors: [`Agent review is not enabled for ${request.criterionId}`] };
   }
 
-  if (config.timeoutMs === undefined && request.defaultTimeoutMs !== undefined) {
-    config = { ...config, timeoutMs: request.defaultTimeoutMs };
+  if (config.timeoutMs === undefined) {
+    config = { ...config, timeoutMs: request.defaultTimeoutMs ?? CRITERION_AGENT_TIMEOUT_MS };
   }
   const validationError = validateAgentReviewConfig(config, request.repositoryPath);
   if (validationError) {

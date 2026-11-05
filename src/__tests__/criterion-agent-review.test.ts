@@ -24,6 +24,8 @@ import { LocalCommandRunner } from '../utils/command-runner';
 import { createEvaluationRun } from '../utils/evaluation-run';
 import { EVALUATOR_SECRETS, withEvaluatorSecrets } from './helpers/evaluator-secrets';
 
+const FAIL_PROMPT = 'The tool failed this criterion on its own findings, and that status stands. For each failure, explain in plain words what the module does, which rule it breaks, and what the module team must change, so a reviewer who has not read the code can follow it. Confirm each failure from the source; when one looks like an analyzer mistake, say so and cite the evidence. Use likely_sufficient only when every failure looks like an analyzer mistake.';
+
 class FakeRunner implements CommandRunner {
   requests: CommandExecutionRequest[] = [];
 
@@ -381,6 +383,23 @@ describe('criterion agent review', () => {
     expect(review).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [EvaluationStatus.MANUAL, true],
+    [EvaluationStatus.FAIL, true],
+    [EvaluationStatus.PASS, false],
+    [EvaluationStatus.NOT_APPLICABLE, false]
+  ])('reviews a %s result: %s, telling the review the status the tool decided', async (status, reviewed) => {
+    const review = jest.fn(async (config: CriterionAgentReviewConfig) => ({ available: true, criterionId: 'F004', evidenceReferences: [], warnings: [], errors: [], summary: config.deterministicStatus }));
+    const result = await reviewCriterionWithAgent({
+      criterionId: 'F004',
+      status,
+      hasReviewMaterial: true,
+      evaluationRun: createEvaluationRun({ repositoryPath: repoPath, language: 'javascript', agentReview: { enabled: true, adapter: 'fake' } }),
+      review
+    });
+    expect(result).toEqual(reviewed ? { agentReview: expect.objectContaining({ summary: status }) } : {});
+  });
+
   it('converts unexpected optional review exceptions into unavailable results', async () => {
     const result = await withEvaluatorSecrets(() => reviewCriterionWithAgent({
       criterionId: 'S005',
@@ -592,6 +611,24 @@ describe('criterion agent review', () => {
     expect(runRequest?.keepStdoutTail).toBe(true);
   });
 
+  it.each([
+    [EvaluationStatus.FAIL, ['review', FAIL_PROMPT, 'Writing style']],
+    [EvaluationStatus.MANUAL, ['review', 'Writing style']]
+  ])('asks the agent to explain the failures of a %s result in plain words, only for a fail', async (deterministicStatus, opening) => {
+    const runner = new FakeRunner();
+    await runCriterionAgentReview({
+      criterionId: 'S004',
+      repositoryPath: repoPath,
+      instructions: 'review',
+      files: [{ repoRelativePath: 'README.md', content: 'Configuration values.' }],
+      schemaDescription: 'schema'
+    }, { ...opencodeConfig(), deterministicStatus }, runner);
+
+    const runRequest = runner.requests.find(request => request.args?.[0] === 'run')!;
+    const prompt = runRequest.args![runRequest.args!.indexOf('--file') - 1];
+    expect(prompt.split('\n').slice(0, opening.length).map(line => line.startsWith('Writing style') ? 'Writing style' : line)).toEqual(opening);
+  });
+
   it('removes external OpenCode runtime data after normal runs', async () => {
     process.env.OPENROUTER_API_KEY = 'sk-or-test-secret';
     const runner = new FakeRunner();
@@ -756,7 +793,7 @@ describe('criterion agent review', () => {
       files: [{ repoRelativePath: 'README.md', content: 'Configuration values.' }],
       schemaDescription: 'schema'
     }, opencodeConfig(), new FakeRunner(undefined, undefined, 'not json', {
-      3: { stdoutDiagnostics: ['record 1: other; Invalid framing'] }
+      4: { stdoutDiagnostics: ['record 1: other; Invalid framing'] }
     }));
 
     expect(result.available).toBe(false);
@@ -796,7 +833,7 @@ describe('criterion agent review', () => {
     expect(result.summary).toBe('Stray brace summary.');
   });
 
-  it.each([1, 2, 3])('stops at timed-out stage %i without retrying', async stage => {
+  it.each([1, 2, 4])('stops at timed-out stage %i without retrying', async stage => {
     const runner = new FakeRunner(undefined, undefined, undefined, {
       [stage]: { status: 'timed_out', durationMs: 180000 }
     });
@@ -810,7 +847,20 @@ describe('criterion agent review', () => {
     expect(result.errors.join('\n')).not.toContain('malformed');
   });
 
-  it.each([1, 2, 3])('rejects capture truncation at stage %i even with a valid prefix', async stage => {
+  it.each([
+    [undefined, undefined, 600000],
+    [420000, undefined, 420000],
+    [420000, 90000, 90000]
+  ])('gives each OpenCode command a criterion default of %s and a run timeout of %s: %i ms', async (defaultTimeoutMs, timeoutMs, expected) => {
+    const runner = new FakeRunner();
+    await runCriterionAgentReview({ criterionId: 'S004', repositoryPath: repoPath, defaultTimeoutMs,
+      instructions: 'review', files: [{ repoRelativePath: 'README.md', content: 'Evidence' }], schemaDescription: 'schema'
+    }, { ...opencodeConfig(), timeoutMs }, runner);
+
+    expect(runner.requests.map(request => request.timeoutMs)).toEqual([expected, expected, expected, expected]);
+  });
+
+  it.each([1, 2, 4])('rejects capture truncation at stage %i even with a valid prefix', async stage => {
     const runner = new FakeRunner(undefined, undefined, undefined, {
       [stage]: { stdoutTruncated: true, stdoutBytes: 1048577 }
     });
@@ -860,7 +910,7 @@ else {
     }
   }, 30_000);
 
-  it.each([1, 2, 3])('retains content-free debug records after timeout at stage %i', async stage => {
+  it.each([1, 2, 4])('retains content-free debug records after timeout at stage %i', async stage => {
     const output = sanitizeStructuredOutput(JSON.stringify({ type: 'tool_use', timestamp: 1500, part: {
       tool: 'read', state: { status: 'completed', time: { start: 1200, end: 1400 },
         input: { filePath: 'PRIVATE_PATH' }, output: 'PRIVATE_CONTENT' }
@@ -878,10 +928,10 @@ else {
       const trace = JSON.parse(text);
       expect(result.available).toBe(false);
       expect(trace.timeoutMs).toBe(180000);
-      if (stage === 3) expect(runner.requests[2].captureDebugTrace).toBe(true);
+      if (stage === 4) expect(runner.requests[3].captureDebugTrace).toBe(true);
       expect(trace.stages).toHaveLength(stage);
       expect(trace.stages[stage - 1]).toMatchObject({ status: 'timed_out', durationMs: 180000, signal: 'SIGTERM', stdoutBytes: 900 });
-      if (stage === 3) expect(trace.stages[2].events).toEqual([
+      if (stage === 4) expect(trace.stages[3].events).toEqual([
         { record: 1, type: 'tool_use', timestamp: 1500, tool: 'read', status: 'completed', durationMs: 200 }
       ]);
       expect(text).not.toMatch(/PRIVATE_|README|apiKey|authorization|test-model/);
@@ -897,13 +947,101 @@ else {
       message: `Rate limit for key ${EVALUATOR_SECRETS.OPENROUTER_API_KEY}`, statusCode: 429,
       responseBody: 'DO_NOT_PUBLISH', headers: { authorization: 'DO_NOT_PUBLISH' }
     } } });
-    const runner = new FakeRunner(undefined, undefined, stdout, { 3: { status: 'failed', exitCode: 1 } });
+    const runner = new FakeRunner(undefined, undefined, stdout, { 4: { status: 'failed', exitCode: 1 } });
     const result = await withEvaluatorSecrets(() => runCriterionAgentReview({ criterionId: 'S004', repositoryPath: repoPath,
       instructions: 'review', files: [{ repoRelativePath: 'README.md', content: 'Evidence' }], schemaDescription: 'schema'
     }, opencodeConfig(), runner));
     expect(result.available).toBe(false);
     expect(result.errors.join('\n')).toContain('APIError: 429: Rate limit for key [REDACTED_OPENROUTER_API_KEY]');
     expect(JSON.stringify(result)).not.toMatch(/fakeOpenRouterKey|DO_NOT_PUBLISH/);
+  });
+
+  describe('OpenCode run diagnosis', () => {
+    // Event shapes from OpenCode v1.17.11 `run --format json`: tool_use when a call ends, text when a part ends.
+    const at = (timestamp: number, type: string, part: Record<string, unknown>) =>
+      JSON.stringify({ type, timestamp, sessionID: 'ses_1', part: { id: `prt_${timestamp}`, sessionID: 'ses_1', ...part } });
+    const stepStart = (timestamp: number, messageID: string) =>
+      at(timestamp, 'step_start', { messageID, type: 'step-start', snapshot: 'PRIVATE_SNAPSHOT' });
+    const tool = (timestamp: number, name: string, status = 'completed') => at(timestamp, 'tool_use', {
+      messageID: 'msg_1', type: 'tool', callID: `call_${timestamp}`, tool: name, state: {
+        status, input: { pattern: 'PRIVATE_INPUT', path: '/PRIVATE_PATH' }, output: 'PRIVATE_OUTPUT', error: 'PRIVATE_ERROR',
+        title: 'PRIVATE_TITLE', metadata: {}, time: { start: timestamp - 50, end: timestamp }
+      }
+    });
+    const stepFinish = (timestamp: number, messageID: string, reason: string) => at(timestamp, 'step_finish', {
+      messageID, type: 'step-finish', reason, snapshot: 'PRIVATE_SNAPSHOT', cost: 0.01,
+      tokens: { input: 15000, output: 300, reasoning: 120, cache: { read: 9000, write: 0 } }
+    });
+    const capture = (...events: string[]) =>
+      sanitizeStructuredOutput(events.join('\n'), 'opencode-json', 16 * 1024 * 1024, true, true).text;
+    const review = (stdout: string, overrides: Partial<CommandExecutionResult>) => runCriterionAgentReview({
+      criterionId: 'S010', repositoryPath: repoPath, instructions: 'PRIVATE_PROMPT',
+      files: [{ repoRelativePath: 'README.md', content: 'Evidence' }], schemaDescription: 'schema'
+    }, { ...opencodeConfig(), enabledCriteria: ['S010'], timeoutMs: 120000 }, new FakeRunner(undefined, undefined, stdout, { 4: overrides }));
+    const timedOut = { status: 'timed_out' as const, durationMs: 120090, signal: 'SIGTERM', stderrBytes: 0,
+      errorMessage: 'Command timed out after 120000ms (signal: SIGTERM)' };
+    const context = (stdoutBytes: number) =>
+      `OpenCode run: 120090ms elapsed; timeout 120000ms; model test-model; stdout ${stdoutBytes} bytes; stderr 0 bytes; timed_out; Command timed out after 120000ms (signal: SIGTERM)`;
+
+    it('reports a timed-out run that was still calling tools, without content', async () => {
+      const result = await review(capture(
+        stepStart(1000, 'msg_1'), tool(2000, 'grep'), tool(3000, 'read'), stepFinish(4000, 'msg_1', 'tool-calls'),
+        stepStart(5000, 'msg_2'), tool(6000, 'grep', 'error'), tool(7000, 'glob')
+      ), { ...timedOut, stdoutBytes: 901898, firstStdoutMs: 2400, lastStdoutMs: 119700 });
+
+      expect(result.errors).toEqual([
+        context(901898),
+        'OpenCode run diagnosis: still calling tools when stopped (4 tool calls; last: glob); first output after 2.4 s; last output 0.4 s before the stop; events 7; steps started 2, finished 1; tool calls grep 2, read 1, glob 1 (1 failed); no answer text; tokens input 15000, output 300, reasoning 120, cache read 9000; last event tool_use glob completed'
+      ]);
+      expect(result.metadata?.runDiagnosis).toEqual({
+        summary: 'still calling tools when stopped (4 tool calls; last: glob)', events: 7, stepsStarted: 2, stepsFinished: 1,
+        toolCalls: { grep: 2, read: 1, glob: 1 }, toolErrors: 1, answerTextParts: 0, lastEvent: 'tool_use glob completed',
+        firstOutputMs: 2400, silentMs: 390, outputTruncated: false, tokens: { input: 15000, output: 300, reasoning: 120, cacheRead: 9000 }
+      });
+      expect(JSON.stringify(result)).not.toMatch(/PRIVATE_|ses_1|msg_|call_/);
+    });
+
+    it.each([
+      ['no output', '', { ...timedOut, stdoutBytes: 0 }, [
+        context(0),
+        'OpenCode run diagnosis: no output from OpenCode before the timeout (likely provider or startup problem)'
+      ]],
+      ['a long silence after a step started', capture(stepStart(1000, 'msg_1'), tool(2000, 'list'), stepFinish(3000, 'msg_1', 'tool-calls'),
+        stepStart(4000, 'msg_2')), { ...timedOut, stdoutBytes: 2048, firstStdoutMs: 3100, lastStdoutMs: 25090 }, [
+        context(2048),
+        'OpenCode run diagnosis: silent for 95.0 s after the last event (likely waiting on the provider); first output after 3.1 s; last output 95.0 s before the stop; events 4; steps started 2, finished 1; tool calls list 1; no answer text; tokens input 15000, output 300, reasoning 120, cache read 9000; last event step_start'
+      ]],
+      ['a failed exit while writing the answer', capture(stepStart(1000, 'msg_1'),
+        at(2000, 'text', { messageID: 'msg_1', type: 'text', text: 'PRIVATE_ANSWER', time: { start: 1500, end: 2000 } })),
+      { status: 'failed' as const, exitCode: 1, durationMs: 41000, stdoutBytes: 700, stderrBytes: 0, errorMessage: 'Command exited with code 1',
+        firstStdoutMs: 1200, lastStdoutMs: 40800, stdoutTruncated: false }, [
+        'OpenCode run: 41000ms elapsed; timeout 120000ms; model test-model; stdout 700 bytes; stderr 0 bytes; failed; Command exited with code 1',
+        'OpenCode run diagnosis: writing the final answer when it exited; first output after 1.2 s; last output 0.2 s before exit; events 2; steps started 1, finished 0; no tool calls; answer text parts 1; last event text'
+      ]]
+    ] as Array<[string, string, Partial<CommandExecutionResult>, string[]]>)('explains a run that stopped with %s', async (_name, stdout, overrides, errors) => {
+      const result = await review(stdout, overrides);
+      expect(result.errors).toEqual(errors);
+      expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+    });
+
+    it.each([
+      ['refreshed', {}, { durationMs: 120090, modelSteps: 2, tokens: { input: 1500, output: 70, reasoning: 0, cacheRead: 900 }, costUsd: 0.03 }],
+      ['could not be refreshed', { status: 'failed' as const, exitCode: 1 }, { durationMs: 120090, modelSteps: 2, tokens: { input: 1500, output: 70, reasoning: 0, cacheRead: 900 } }]
+    ])('records the run\'s usage, with its cost only when the models.dev catalog %s', async (_name, refresh, usage) => {
+      const step = (timestamp: number, cost: number, input: number, output: number) => at(timestamp, 'step_finish', {
+        messageID: `msg_${timestamp}`, type: 'step-finish', reason: 'tool-calls', cost, tokens: { input, output, reasoning: 0, cache: { read: 450, write: 0 } }
+      });
+      const runner = new FakeRunner(undefined, undefined, capture(step(1000, 0.01, 1000, 50), step(2000, 0.02, 500, 20)), {
+        3: refresh, 4: { ...timedOut, stdoutBytes: 600 }
+      });
+      const result = await runCriterionAgentReview({
+        criterionId: 'S010', repositoryPath: repoPath, instructions: 'review',
+        files: [{ repoRelativePath: 'README.md', content: 'Evidence' }], schemaDescription: 'schema'
+      }, { ...opencodeConfig(), modelLabel: 'openrouter/deepseek/deepseek-v4.1-flash-1017', enabledCriteria: ['S010'], timeoutMs: 120000 }, runner);
+
+      expect(runner.requests[2].args).toEqual(['models', 'openrouter', '--refresh']);
+      expect(result.metadata?.usage).toEqual(usage);
+    });
   });
 
   it('normalizes common off-schema OpenCode advisory fields', async () => {
@@ -1409,6 +1547,7 @@ else {
       const generatedAuth = JSON.parse(fs.readFileSync(generatedAuthPath, 'utf-8'));
 
       expect(generatedConfig.model).toBe('openrouter/openrouter/free');
+      expect(generatedConfig.small_model).toBe('openrouter/openrouter/free');
       expect(generatedConfig.provider.openrouter.models['openrouter/free']).toEqual({});
       expect(generatedConfig.agent.reviewer.permission).toEqual(expect.objectContaining({
         read: 'allow',

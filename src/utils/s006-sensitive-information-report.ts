@@ -117,7 +117,10 @@ function formatWhatToDoLines(analysis: S006SensitiveInformationAnalysisResult, f
   if (analysis.coverage.materiallyWeakened) {
     lines.push('  - Check the files under Coverage gaps, which were not fully scanned.');
   }
-  return lines.length ? ['What to do:', ...lines, ''] : [];
+  if (lines.length) return ['What to do:', ...lines, ''];
+  return analysis.classification.status === EvaluationStatus.PASS
+    ? ['What to do: Nothing; no secrets or environment-specific values were found.', '']
+    : ['What to do: Check each value listed under Findings and decide whether it exposes a secret, a real deployment, or a private path on a developer\'s machine.', ''];
 }
 
 function isSecretCategory(finding: S006SensitiveInformationFinding): boolean {
@@ -268,11 +271,11 @@ function appendAgentReviewLines(
   agentReview?: CriterionAgentReviewResult
 ): void {
   if (agentReview?.available) {
-    lines.push('', ...renderAgentReviewLines(agentReview, s006AgentReviewSubjectNames(analysis, agentReview)), '  - Advisory only; the S006 result stays Manual review.');
+    lines.push('', ...renderAgentReviewLines(agentReview, s006AgentReviewSubjectNames(analysis, agentReview)), '  - Advisory only; the criterion status is unchanged.');
     return;
   }
 
-  if (analysis.classification.status !== EvaluationStatus.MANUAL) {
+  if (analysis.classification.status !== EvaluationStatus.MANUAL && analysis.classification.status !== EvaluationStatus.FAIL) {
     return;
   }
 

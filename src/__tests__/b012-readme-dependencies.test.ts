@@ -56,6 +56,8 @@ describe('B012 dependencies declared in README', () => {
       + '(RMB database schema src/main/resources/templates/db_scripts/schema.json; org.folio:folio-kafka-wrapper in pom.xml).');
     expect(rows).toEqual([
       'README: README.md',
+      'What to do:',
+      '  - Name PostgreSQL and Apache Kafka in README.md, with what the module uses each for.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - PostgreSQL (required) — not named',
       '    - RMB database schema src/main/resources/templates/db_scripts/schema.json',
@@ -63,11 +65,11 @@ describe('B012 dependencies declared in README', () => {
       '    - org.folio:folio-kafka-wrapper in pom.xml',
       '  - S3 object storage (required) — named as "S3"',
       '    - org.folio:folio-s3-client in pom.xml',
-      'What to do:',
-      '  - Name PostgreSQL and Apache Kafka in README.md, with what the module uses each for.',
       'Checklist for the reviewer:',
       ...C1(),
-      ...C2('README.md', ['      - pom.xml — Apache Kafka: org.folio:folio-kafka-wrapper'])
+      ...C2('README.md', ['      - pom.xml — Apache Kafka: org.folio:folio-kafka-wrapper']),
+      'Agent review:',
+      '  - Not applied: agent review is disabled or unconfigured'
     ]);
     expect(analysis.checklist.items.map(item => [item.id, item.reviewerOnly, item.obligations])).toEqual([
       ['B012-C1', false, [{ id: 'B012-C1#1' }]],
@@ -83,6 +85,7 @@ describe('B012 dependencies declared in README', () => {
       + 'and S3 object storage (as "MinIO").');
     expect(rows).toEqual([
       'README: README.MD',
+      'What to do: Nothing; the README names all the infrastructure the module requires.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - PostgreSQL (required) — named as "Postgres"',
       '    - RMB database schema src/main/resources/templates/db_scripts/schema.json',
@@ -109,6 +112,7 @@ describe('B012 dependencies declared in README', () => {
       + 'A reviewer must check the items listed under B012-C3.');
     expect(vaultOnly.rows).toEqual([
       'README: README.md',
+      'What to do: Check the items listed under B012-C3 on the checklist below; the README must name each infrastructure the module uses.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - AWS Systems Manager Parameter Store (optional or selectable) — not named',
       `    - software.amazon.awssdk:ssm in pom.xml (${note})`,
@@ -139,6 +143,8 @@ describe('B012 dependencies declared in README', () => {
       + 'It does not name Apache Kafka or HashiCorp Vault either, which the module may use (spring.kafka.a\\u0001b in src/main/resources/application.yml; VAULT_TOKEN in src/main/java/org/example/Main.java).');
     expect(rows).toEqual([
       'README: README.md',
+      'What to do:',
+      '  - Name Redis in README.md, with what the module uses it for.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - Apache Kafka (configuration only, no client library) — not named',
       '    - spring.kafka.a\\u0001b in src/main/resources/application.yml',
@@ -148,11 +154,11 @@ describe('B012 dependencies declared in README', () => {
       '    - VAULT_TOKEN in src/main/java/org/example/Main.java',
       'What the tool could not read:',
       '  - pom.xml — the dependency ${lettuce.group}:lettuce[evidence: x) uses a property the tool could not resolve',
-      'What to do:',
-      '  - Name Redis in README.md, with what the module uses it for.',
       'Checklist for the reviewer:',
       ...C1(),
-      ...C2('README.md', ['      - src/main/resources/application.yml — Apache Kafka: spring.kafka.a\\u0001b'])
+      ...C2('README.md', ['      - src/main/resources/application.yml — Apache Kafka: spring.kafka.a\\u0001b']),
+      'Agent review:',
+      '  - Not applied: agent review is disabled or unconfigured'
     ]);
   });
 
@@ -166,16 +172,18 @@ describe('B012 dependencies declared in README', () => {
     expect(result.evidence).toBe('B012 fail: There is no README.md at the repository root, so nothing names Apache Kafka, which the module uses (org.folio:folio-kafka-wrapper in pom.xml).');
     expect(rows).toEqual([
       'README: no README.md at the repository root',
+      'What to do:',
+      '  - Add a README.md at the repository root that names Apache Kafka, with what the module uses it for.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - Apache Kafka (required) — not named',
       '    - org.folio:folio-kafka-wrapper in pom.xml',
-      'What to do:',
-      '  - Add a README.md at the repository root that names Apache Kafka, with what the module uses it for.',
       'Checklist for the reviewer:',
       '  - B012-C1 Each external service the module calls, other than FOLIO interfaces and the infrastructure listed, is named in README.md.',
       '  - B012-C2 Each Kafka topic the module consumes from or produces for other modules is named in README.md.',
       '    - Start with:',
-      '      - pom.xml — Apache Kafka: org.folio:folio-kafka-wrapper'
+      '      - pom.xml — Apache Kafka: org.folio:folio-kafka-wrapper',
+      'Agent review:',
+      '  - Not applied: agent review is disabled or unconfigured'
     ]);
   });
 
@@ -195,6 +203,7 @@ describe('B012 dependencies declared in README', () => {
       + 'A reviewer must check the items listed under B012-C3.');
     expect(rows).toEqual([
       'README: README.md; could not read README.MD',
+      'What to do: Check the items listed under B012-C3 on the checklist below; the README must name each infrastructure the module uses.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - Apache Kafka (required) — named as "Kafka"',
       '    - org.folio:folio-kafka-wrapper in pom.xml',
@@ -225,6 +234,7 @@ describe('B012 dependencies declared in README', () => {
       + 'the infrastructure the module uses: Apache Kafka. A reviewer must check the items listed under B012-C3.');
     expect(rows).toEqual([
       'README: not among the files read',
+      'What to do: Check the items listed under B012-C3 on the checklist below; the README must name each infrastructure the module uses.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - Apache Kafka (required) — not checked',
       '    - org.folio:folio-kafka-wrapper in pom.xml',
@@ -255,6 +265,7 @@ describe('B012 dependencies declared in README', () => {
     expect(none.result.evidence).toBe('B012 pass: The tool found no infrastructure the module uses, so README.md has none to name.');
     expect(none.rows).toEqual([
       'README: README.md',
+      'What to do: Nothing; the tool found no infrastructure the module requires.',
       'Infrastructure the module uses (direct dependencies, configuration and storage): none found',
       'Checklist for the reviewer:',
       ...C1(),
@@ -265,6 +276,7 @@ describe('B012 dependencies declared in README', () => {
       + 'Some build, configuration or source files could not be read, so the module may use infrastructure the tool did not find. A reviewer must check the items listed under B012-C3.');
     expect(unread.rows).toEqual([
       'README: README.md',
+      'What to do: Check the items listed under B012-C3 on the checklist below; the README must name each infrastructure the module uses.',
       'Infrastructure the module uses (direct dependencies, configuration and storage):',
       '  - Apache Kafka (required) — named as "Kafka"',
       '    - org.folio:folio-kafka-wrapper in pom.xml',
@@ -345,12 +357,12 @@ describe('B012 dependencies declared in README', () => {
       expect(rows!.slice(-2)).toEqual(['Agent review:', '  - Not applied: agent review for B012 runs only when listed in --criterion-agent-criteria']);
     });
 
-    it('does not review a pass or a fail, even when listed', async () => {
+    it('reviews a fail but not a pass when listed', async () => {
       const pass = await b012(edgeModule('`AwsSsm`, `Vault`'), fakeConfig(['B012']));
       const fail = await b012(rmbModule({ 'README.md': 'Nothing.\n' }), fakeConfig(['B012']));
 
       expect([pass.result.status, pass.result.agentReview, fail.result.status, fail.result.agentReview])
-        .toEqual([EvaluationStatus.PASS, undefined, EvaluationStatus.FAIL, undefined]);
+        .toEqual([EvaluationStatus.PASS, undefined, EvaluationStatus.FAIL, expect.objectContaining({ available: true })]);
       expect(pass.rows!.some(row => row.startsWith('Agent review'))).toBe(false);
     });
 

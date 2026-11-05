@@ -208,7 +208,8 @@ spec and a committed class must implement the interface named after its RAML res
 any module's endpoint is also implemented by a route in the source (Vert.x router, Spring mapping
 annotations, Grails URL mappings). It fails when an RMB or Spring endpoint is in no spec and no route,
 and leaves missing implementing classes, wildcard handlers, library endpoints and unreadable evidence
-to the reviewer. See [Criterion Notes](docs/criterion-notes.md#b003-endpoint-implementations).
+to the reviewer. When agent review is enabled, the agent looks for the code serving each endpoint the
+tool could not match, except library endpoints. See [Criterion Notes](docs/criterion-notes.md#b003-endpoint-implementations).
 
 ### B004 Environment Variables
 
@@ -223,8 +224,7 @@ alongside. With `--existing-module`, documentation gaps are left to the reviewer
 applies. A variable that RMB, folio-spring-base or the FOLIO Java base image documents (listed with
 pinned sources in the same directory) needs no documentation of its own when README.md or ENV_VARS.md links to
 that documentation, and goes to the reviewer when it does not. Required variables without fail-fast evidence
-and log statements that may print secrets also go to the reviewer, and, for a manual result, to the
-agent review. See [Criterion Notes](docs/criterion-notes.md#b004-environment-variables).
+and log statements that may print secrets also go to the reviewer and to the agent review. See [Criterion Notes](docs/criterion-notes.md#b004-environment-variables).
 
 ### B005 Interface Naming
 
@@ -367,7 +367,7 @@ run and removed afterwards, also on Ctrl-C. It needs a reachable Docker daemon. 
 
 ### Agent Review
 
-Some criteria can optionally add advisory OpenCode review to manual results. See [Agent Review Configuration](docs/agent-review.md) for provider setup, CLI flags, supported criteria, and GitHub Actions notes.
+Some criteria can optionally add advisory OpenCode review to manual and failed results; for a fail, the agent explains each failure in plain words. See [Agent Review Configuration](docs/agent-review.md) for provider setup, CLI flags, supported criteria, and GitHub Actions notes.
 
 S010 third-party resilience uses conservative committed-source checks for Java and
 Stripes/React modules. Difficult static cases remain manual and can use the optional
@@ -383,10 +383,10 @@ SonarCloud, and S014 (assigned to exactly one application on the FOLIO LSP platf
 reads `folio-org/folio-integration-tests` when you do:
 
 ```bash
-folio-eval evaluate https://github.com/folio-org/mod-search --allow-remote-lookups --application app-search
+folio-eval evaluate https://github.com/folio-org/mod-search --allow-remote-lookups
 ```
 
-`--application` is the application named in the evaluation's Jira task. `--platform-ref` picks the
+`--platform-ref` picks the
 platform-lsp branch, tag or commit (default `snapshot`). Remote reads are read-only, allowlisted and
 bounded, and each one is recorded in the report. An optional `SONAR_TOKEN` is sent to SonarCloud only;
 S011 reads SonarCloud's own project settings only when that token can administer the project. See
@@ -468,7 +468,6 @@ All inputs are optional:
 | `node_version` | Node.js version for npm builds | `20` |
 | `evaluator_ref` | tc-module-eval branch/tag to use | `master` |
 | `allow_remote_lookups` | Allow read-only lookups of SonarCloud, platform-lsp and FAR, needed for S011, S013 and S014 (the job's read-only `GITHUB_TOKEN` is then sent to api.github.com only) | `false` |
-| `application` | Application named in the evaluation's Jira task, e.g. `app-search` (S014) | none |
 | `platform_ref` | platform-lsp branch, tag or commit S014 reads | `snapshot` |
 | `existing_module` | Evaluate an existing module rather than a new one (passes `--existing-module`) | `false` |
 
@@ -539,7 +538,7 @@ To evaluate any repository without adding a workflow to it:
 
 1. In this tc-module-eval project, go to [Actions > Evaluate Remote Repository](https://github.com/folio-org/tc-module-eval/actions/workflows/evaluate-remote.yml).
 
-1. Click Run Workflow, enter the GitHub URL of the module to evaluate, and click Run Workflow. To check S011, S013 and S014, and folio-integration-tests for B009, also tick remote lookups, and for S014 enter the application named in the evaluation's Jira task.
+1. Click Run Workflow, enter the GitHub URL of the module to evaluate, and click Run Workflow. To check S011, S013 and S014, and folio-integration-tests for B009, also tick remote lookups.
 
 1. Wait for the workflow to complete, then download the reports from Artifacts.
 

@@ -44,12 +44,11 @@ export interface RemoteEvidenceTransportOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const REPOSITORY = '(?:platform-lsp|app-[a-z0-9._-]+)';
 const ALLOWED_PATHS: Readonly<Record<string, RegExp>> = {
   'sonarcloud.io': /^\/api\//,
   'far.ci.folio.org': /^\/applications$/,
-  'raw.githubusercontent.com': new RegExp(`^/folio-org/${REPOSITORY}/`),
-  'api.github.com': new RegExp(`^/repos/folio-org/(?:${REPOSITORY}(?:/|$)|folio-integration-tests/(?:contents/|git/trees/[0-9a-f]{40})$)`)
+  'raw.githubusercontent.com': /^\/folio-org\/platform-lsp\//,
+  'api.github.com': /^\/repos\/folio-org\/(?:platform-lsp(?:\/|$)|folio-integration-tests\/(?:contents\/|git\/trees\/[0-9a-f]{40})$)/
 };
 const DEFAULT_RETRY_WAIT_MS = 1_000;
 const TOKEN_PATTERN = /^[\x21-\x7e]{1,1024}$/;
@@ -88,7 +87,9 @@ export class RemoteEvidenceTransport implements RemoteLookups {
   private readonly sleep: (ms: number) => Promise<void>;
   private requestCount = 0;
   private byteCount = 0;
-  private deadline?: number;
+  private inFlight = 0;
+  private busySince = 0;
+  private spentMs = 0;
   private active = 0;
   private readonly waiting: Array<() => void> = [];
 
@@ -103,7 +104,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
   async getJson(url: string): Promise<RemoteJsonResult> {
     const record: RemoteEvidenceRecord = { url, fetchedAt: new Date(this.now()).toISOString() };
     this.records.push(record);
-    this.deadline ??= this.now() + this.limits.maxDurationMs;
+    if (this.inFlight++ === 0) this.busySince = this.now();
     await this.acquireSlot();
     const attempts: RemoteEvidenceAttempt[] = [];
     try {
@@ -124,6 +125,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
       // Each redirect hop and retry is its own HTTP request; list them all when there was more than one.
       if (attempts.length > 1) record.attempts = attempts;
       this.releaseSlot();
+      if (--this.inFlight === 0) this.spentMs += this.now() - this.busySince;
     }
   }
 
@@ -164,7 +166,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
             throw new RemoteFailure(status === 429 ? 'rate-limited' : 'http-status',
               `HTTP ${status}, and the server asked to wait ${Math.ceil(wait / 1000)} s before retrying, longer than the ${this.limits.maxRetryWaitMs / 1000} s the tool waits.`, status);
           }
-          if (this.now() + wait >= this.deadline!) throw this.timeBudgetFailure();
+          if (wait >= this.remainingMs()) throw this.timeBudgetFailure();
           attempt.clear();
           await this.sleep(wait);
           retried = true;
@@ -205,7 +207,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
       throw new RemoteFailure('budget-requests', `The evaluation's limit of ${this.limits.maxRequests} remote requests was reached.`);
     }
     if (this.byteCount >= this.limits.maxTotalBytes) throw this.byteBudgetFailure();
-    const remaining = this.deadline! - this.now();
+    const remaining = this.remainingMs();
     if (remaining <= 0) throw this.timeBudgetFailure();
     const authorization = this.authorizationFor(url.hostname);
     this.requestCount++;
@@ -294,6 +296,11 @@ export class RemoteEvidenceTransport implements RemoteLookups {
 
   private timeoutFailure(): RemoteFailure {
     return new RemoteFailure('timeout', `No complete response within ${this.limits.requestTimeoutMs / 1000} s.`);
+  }
+
+  // The time budget counts only time with a lookup in flight, so slow work between lookups (an agent review) spends none of it.
+  private remainingMs(): number {
+    return this.limits.maxDurationMs - this.spentMs - (this.inFlight ? this.now() - this.busySince : 0);
   }
 
   private timeBudgetFailure(): RemoteFailure {

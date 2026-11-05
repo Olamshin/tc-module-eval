@@ -6,7 +6,10 @@ import {
   CommandExecutionResult,
   CommandRunner,
   CriterionAgentReviewConfig,
-  CriterionAgentReviewResult
+  CriterionAgentReviewResult,
+  CriterionAgentRunDiagnosis,
+  CriterionAgentUsage,
+  EvaluationStatus
 } from '../types';
 import {
   CriterionAgentReviewRequest,
@@ -14,13 +17,15 @@ import {
   PreparedCriterionReviewWorkspace
 } from './criterion-agent-review';
 import { redactEvaluatorSecrets } from './redaction';
-import { decodeOpenCodeOutput, openCodeEventTrace, OpenCodeOutput, parseJsonObject } from './opencode-output';
+import { decodeOpenCodeOutput, OpenCodeEventTrace, OpenCodeOutput, openCodeOutputTraces, parseJsonObject } from './opencode-output';
 import { errorMessage } from './type-guards';
 
 const REQUIRED_ENV_KEYS = ['PATH', 'HOME', 'TMPDIR'];
 // Tool events dominate the review run's output and the answer comes last. Keep
 // the newest output so large modules still produce a review.
 const OPENCODE_RUN_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const OPENCODE_SILENCE_MS = 30_000;
+const FAIL_INSTRUCTION = 'The tool failed this criterion on its own findings, and that status stands. For each failure, explain in plain words what the module does, which rule it breaks, and what the module team must change, so a reviewer who has not read the code can follow it. Confirm each failure from the source; when one looks like an analyzer mistake, say so and cite the evidence. Use likely_sufficient only when every failure looks like an analyzer mistake.';
 
 export async function runOpenCodeAgentReview(
   request: CriterionAgentReviewRequest,
@@ -47,7 +52,6 @@ export async function runOpenCodeAgentReview(
   };
   const runStage = async (stage: string, command: CommandExecutionRequest): Promise<CommandExecutionResult> => {
     if (!config.debugRetainWorkspace) return commandRunner.run(command);
-    command = { ...command, captureDebugTrace: command.stdoutFormat === 'opencode-json' };
     const entry: Record<string, unknown> = { stage, startedAt: new Date().toISOString(), status: 'running' };
     stages.push(entry);
     saveTrace();
@@ -67,15 +71,9 @@ export async function runOpenCodeAgentReview(
       stdoutTruncated: result.stdoutTruncated ?? false, stderrTruncated: result.stderrTruncated ?? false
     });
     if (command.stdoutFormat === 'opencode-json') {
-      const records = result.stdout.split(/\r?\n/).filter(line => line.trim());
-      entry.events = records.slice(0, 2000).map((line, index) => {
-        const event = parseJsonObject(line);
-        const metadata = event?.debugTrace;
-        return { record: index + 1, ...openCodeEventTrace(
-          metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : event
-        ) };
-      });
-      entry.omittedEvents = Math.max(0, records.length - 2000);
+      const events = openCodeOutputTraces(result.stdout);
+      entry.events = events.slice(0, 2000).map((event, index) => ({ record: index + 1, ...event }));
+      entry.omittedEvents = Math.max(0, events.length - 2000);
     }
     saveTrace();
     return result;
@@ -106,7 +104,7 @@ export async function runOpenCodeAgentReview(
     command: 'opencode',
     args: ['debug', 'config'],
     cwd: workspace.rootPath,
-    env: invocation.env,
+    env: invocation.debugEnv,
     timeoutMs: config.timeoutMs,
     stdoutFormat: 'json'
   });
@@ -118,7 +116,7 @@ export async function runOpenCodeAgentReview(
     command: 'opencode',
     args: ['debug', 'agent', config.readOnlyAgentName],
     cwd: workspace.rootPath,
-    env: invocation.env,
+    env: invocation.debugEnv,
     timeoutMs: config.timeoutMs,
     stdoutFormat: 'json'
   });
@@ -130,6 +128,15 @@ export async function runOpenCodeAgentReview(
   if (permissionError) {
     return baseUnavailable(permissionError);
   }
+
+  // OpenCode prices each step from its models.dev catalog; a run that starts before the catalog is cached reports a cost of 0.
+  const catalog = await runStage('models-refresh', {
+    command: 'opencode',
+    args: ['models', config.modelLabel.split('/')[0], '--refresh'],
+    cwd: workspace.rootPath,
+    env: invocation.debugEnv,
+    timeoutMs: config.timeoutMs
+  });
 
   const run = await runStage('review', {
     command: 'opencode',
@@ -143,6 +150,7 @@ export async function runOpenCodeAgentReview(
       'json',
       [
         request.instructions,
+        ...(config.deterministicStatus === EvaluationStatus.FAIL ? [FAIL_INSTRUCTION] : []),
         'Writing style for all report prose: write for a Technical Council decision-maker, not an implementation debugger. Use plain English, short sentences, and concrete outcomes. Lead with the conclusion and its operational impact.',
         'Summary: at most two short sentences, targeting 45 words total. State the overall judgment and the main risk or remaining decision. Do not list every dependency or repeat the recommendation label.',
         'Rationale: at most three short sentences, targeting 70 words total. Explain the decisive evidence, scope actually investigated, and material uncertainty without repeating the summary or narrating your investigation.',
@@ -162,16 +170,27 @@ export async function runOpenCodeAgentReview(
     timeoutMs: config.timeoutMs,
     stdoutFormat: 'opencode-json',
     maxOutputBytes: OPENCODE_RUN_MAX_OUTPUT_BYTES,
-    keepStdoutTail: true
+    keepStdoutTail: true,
+    captureDebugTrace: true
   });
 
   const cut = run.stdoutTruncated === true;
   const decoded = decodeOpenCodeOutput(run.stdout, cut);
+  const events = openCodeOutputTraces(run.stdout);
+  const usage = openCodeRunUsage(events, run.durationMs, catalog.status === 'success');
   if (run.status !== 'success' || (cut && !decoded.payload)) {
-    return baseUnavailable(commandFailure('run', run, config, decoded));
+    const unavailable = baseUnavailable(commandFailure('run', run, config, decoded));
+    unavailable.metadata = { ...unavailable.metadata!, usage };
+    if (run.status === 'failed' || run.status === 'timed_out') {
+      const diagnosis = diagnoseOpenCodeRun(run, events);
+      unavailable.errors.push(redactEvaluatorSecrets(diagnosis.line, 600));
+      unavailable.metadata.runDiagnosis = diagnosis.diagnosis;
+    }
+    return unavailable;
   }
 
   const result = normalizeOpenCodeResult(decoded, request, workspace, config);
+  result.metadata = { ...result.metadata!, usage };
   if (cut) {
     result.warnings.push(`OpenCode run output exceeded the ${OPENCODE_RUN_MAX_OUTPUT_BYTES}-byte capture limit (stdout ${run.stdoutBytes ?? 'unknown'} bytes); earlier output was dropped and the review was read from the end of the output`);
   }
@@ -195,6 +214,91 @@ function commandFailure(stage: string, run: CommandExecutionResult, config: Crit
       ? 'kept the end of the output, but it did not contain the whole final answer'
       : redactEvaluatorSecrets(run.errorMessage ?? '', 500);
   return `${commandContext(stage, run, config)}; ${reason}${run.stdoutTruncated && run.status !== 'success' ? '; capture truncated' : ''}${detail ? `; ${detail}` : ''}`;
+}
+
+function openCodeRunUsage(events: OpenCodeEventTrace[], durationMs: number, priced: boolean): CriterionAgentUsage {
+  const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0 };
+  let modelSteps = 0;
+  let costUsd: number | undefined;
+  for (const event of events) {
+    if (event.type !== 'step_finish') continue;
+    modelSteps += 1;
+    tokens.input += event.tokens?.input ?? 0;
+    tokens.output += event.tokens?.output ?? 0;
+    tokens.reasoning += event.tokens?.reasoning ?? 0;
+    tokens.cacheRead += event.tokens?.cacheRead ?? 0;
+    if (event.cost !== undefined) costUsd = (costUsd ?? 0) + event.cost;
+  }
+  return { durationMs, modelSteps, tokens, ...(priced && costUsd !== undefined ? { costUsd } : {}) };
+}
+
+// OpenCode emits tool_use when a tool call ends and text when a text part ends, so a step in progress shows only its step_start.
+function diagnoseOpenCodeRun(run: CommandExecutionResult, events: OpenCodeEventTrace[]): { line: string; diagnosis: CriterionAgentRunDiagnosis } {
+  const toolCalls: Record<string, number> = {};
+  const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0 };
+  let tokensReported = false;
+  let stepsStarted = 0;
+  let stepsFinished = 0;
+  let toolErrors = 0;
+  let answerTextParts = 0;
+  for (const event of events) {
+    if (event.type === 'step_start') stepsStarted += 1;
+    if (event.type === 'text') answerTextParts += 1;
+    if (event.type === 'tool_use' && event.tool) {
+      toolCalls[event.tool] = (toolCalls[event.tool] ?? 0) + 1;
+      if (event.status === 'error') toolErrors += 1;
+    }
+    if (event.type === 'step_finish') {
+      stepsFinished += 1;
+      if (event.tokens) {
+        tokensReported = true;
+        tokens.input += event.tokens.input ?? 0;
+        tokens.output += event.tokens.output ?? 0;
+        tokens.reasoning += event.tokens.reasoning ?? 0;
+        tokens.cacheRead += event.tokens.cacheRead ?? 0;
+      }
+    }
+  }
+  const last = events[events.length - 1];
+  const lastEvent = last && [last.type, last.tool, last.status, last.reason].filter(Boolean).join(' ');
+  const calls = Object.values(toolCalls).reduce((sum, count) => sum + count, 0);
+  const silentMs = run.lastStdoutMs === undefined ? undefined : Math.max(0, run.durationMs - run.lastStdoutMs);
+  const timedOut = run.status === 'timed_out';
+  const when = timedOut ? 'when stopped' : 'when it exited';
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  const summary = !last
+    ? run.stdoutBytes ? 'no OpenCode events in the kept output'
+      : `no output from OpenCode before ${timedOut ? 'the timeout (likely provider or startup problem)' : 'it exited'}`
+    : last.type === 'error' ? 'OpenCode reported an error'
+      : last.type === 'step_finish' && last.reason === 'stop'
+        ? `the model finished its answer, but OpenCode ${timedOut ? 'did not exit' : 'then failed'}`
+        : silentMs !== undefined && silentMs >= OPENCODE_SILENCE_MS ? `silent for ${seconds(silentMs)} after the last event (likely waiting on the provider)`
+          : last.type === 'tool_use' ? `still calling tools ${when} (${calls} tool calls; last: ${last.tool})`
+            : last.type === 'text' ? `writing the final answer ${when}`
+              : last.type === 'step_start' ? `a model step had started but finished no tool call or text ${when}`
+                : last.type === 'step_finish' ? `starting the next model step ${when} (${calls} tool calls)`
+                  : `last event was ${last.type} ${when}`;
+  const diagnosis: CriterionAgentRunDiagnosis = {
+    summary, events: events.length, stepsStarted, stepsFinished, toolCalls, toolErrors, answerTextParts, lastEvent,
+    firstOutputMs: run.firstStdoutMs, silentMs, outputTruncated: run.stdoutTruncated === true,
+    ...(tokensReported ? { tokens } : {})
+  };
+  const tools = Object.entries(toolCalls).sort((left, right) => right[1] - left[1]).map(([tool, count]) => `${tool} ${count}`);
+  const line = [
+    `OpenCode run diagnosis: ${summary}`,
+    run.firstStdoutMs !== undefined ? `first output after ${seconds(run.firstStdoutMs)}` : undefined,
+    silentMs !== undefined ? `last output ${seconds(silentMs)} before ${timedOut ? 'the stop' : 'exit'}` : undefined,
+    ...(last ? [
+      `events ${events.length}`,
+      `steps started ${stepsStarted}, finished ${stepsFinished}`,
+      tools.length ? `tool calls ${tools.join(', ')}${toolErrors ? ` (${toolErrors} failed)` : ''}` : 'no tool calls',
+      answerTextParts ? `answer text parts ${answerTextParts}` : 'no answer text',
+      tokensReported ? `tokens input ${tokens.input}, output ${tokens.output}, reasoning ${tokens.reasoning}, cache read ${tokens.cacheRead}` : undefined,
+      `last event ${lastEvent}`
+    ] : []),
+    diagnosis.outputTruncated ? 'earlier output was dropped at the capture limit, so counts cover only the kept end' : undefined
+  ].filter(Boolean).join('; ');
+  return { line, diagnosis };
 }
 
 export function materializeOpenCodeInvocation(
@@ -251,6 +355,9 @@ export function materializeOpenCodeInvocation(
 
   return {
     env,
+    // OpenCode's preparatory commands leave lock directories in their state directory, which keep the review run from
+    // reading the refreshed models.dev catalog, so it would not know the model's price.
+    debugEnv: { ...env, XDG_STATE_HOME: path.join(opencodeRoot, 'debug-state') },
     runtimeRootPath: opencodeRoot,
     provenancePaths: [
       config.trustedConfigPath,
@@ -277,6 +384,7 @@ export function removeOpenCodeRuntimeCredentials(workspace: PreparedCriterionRev
 
 interface OpenCodeInvocation {
   env: Record<string, string | undefined>;
+  debugEnv: Record<string, string | undefined>;
   runtimeRootPath: string;
   provenancePaths: string[];
 }
@@ -292,6 +400,9 @@ function buildGeneratedOpenCodeConfig(config: CriterionAgentReviewConfig): Recor
 
   if (modelLabel) {
     generated.model = modelLabel;
+    // OpenCode titles each session with its small model, by default a provider's own pick (claude-haiku on OpenRouter),
+    // whose cost the run's steps do not report.
+    generated.small_model = modelLabel;
   }
 
   if (config.generatedProvider) {

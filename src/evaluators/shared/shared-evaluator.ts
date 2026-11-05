@@ -124,7 +124,7 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
         criterionId: 'S004',
         status: EvaluationStatus.NOT_APPLICABLE,
         evidence: 'S004 does not apply to explicit FOLIO library repositories',
-        details: this.formatModuleKindDetails('Repository kind: library', moduleKind)
+        details: this.formatModuleKindDetails('Nothing; S004 does not apply to FOLIO libraries.', moduleKind)
       };
     }
 
@@ -161,7 +161,7 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
         criterionId: 'S005',
         status: EvaluationStatus.NOT_APPLICABLE,
         evidence: 'S005 does not apply to explicit FOLIO library repositories',
-        details: this.formatModuleKindDetails('Repository kind: library', moduleKind),
+        details: this.formatModuleKindDetails('Nothing; S005 does not apply to FOLIO libraries.', moduleKind),
         criterionDetails: {
           moduleKind
         }
@@ -172,8 +172,7 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
     analysis.warnings.push(...moduleKind.warnings);
     const { agentReview, unavailableReason } = await reviewCriterionWithAgent({
       criterionId: 'S005',
-      // A complete form that fails only because it is misnamed or misplaced still gets advisory review.
-      status: analysis.nearMatchStatus ?? analysis.classification.status,
+      status: analysis.classification.status,
       hasReviewMaterial: true,
       evaluationRun: run,
       review: (config, commandRunner) => reviewS005WithAgent(repoPath, analysis, config, commandRunner)
@@ -225,8 +224,8 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
     const run = this.runFor(repoPath, 'S007', evaluationRun);
     const shared = await getS007Analysis(run, repoPath);
     const { policyLoad } = shared;
-    // A copy: the review note below belongs to this result, not to the analysis the run caches for S007 and F005.
-    const analysis = { ...shared.analysis };
+    // A copy: the review note and evaluation mode below belong to this result, not to the analysis the run caches for S007 and F005.
+    const analysis = { ...shared.analysis, existingModule: run.existingModule };
     const { agentReview, unavailableReason } = await reviewCriterionWithAgent({
       criterionId: 'S007',
       status: analysis.status,
@@ -385,9 +384,15 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
     };
   }
 
-  private formatModuleKindDetails(heading: string, moduleKind: ModuleKindResult): string {
+  protected createErrorResult(criterionId: string, error: unknown): CriterionResult {
+    const result = super.createErrorResult(criterionId, error);
+    return { ...result, details: `${result.details}\nWhat to do: Check this criterion by hand; the evaluator stopped with an error before it could decide.` };
+  }
+
+  private formatModuleKindDetails(whatToDo: string, moduleKind: ModuleKindResult): string {
     return [
-      heading,
+      `What to do: ${whatToDo}`,
+      'Repository kind: library',
       'Module-kind evidence:',
       ...moduleKind.evidence.map(evidence => `  - ${reportText(evidence)}`),
       ...(moduleKind.warnings.length ? ['Warnings:', ...moduleKind.warnings.map(warning => `  - ${reportText(warning)}`)] : [])

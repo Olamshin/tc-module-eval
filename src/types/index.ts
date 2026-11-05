@@ -91,6 +91,9 @@ export interface CommandExecutionResult {
   stdoutDiagnostics?: string[];
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
+  /** Milliseconds from the command's start until its first and its last stdout data arrived. */
+  firstStdoutMs?: number;
+  lastStdoutMs?: number;
   errorMessage?: string;
   sanitized: boolean;
 }
@@ -162,8 +165,6 @@ export interface EvaluationRun {
   requestedBranch?: string;
   /** The remote-evidence transport; absent unless --allow-remote-lookups was given. */
   remoteLookups?: import('./remote-evidence').RemoteLookups;
-  /** The application the evaluation's Jira task names (--application). */
-  s014Application?: string;
   /** The platform-lsp branch, tag or commit S014 reads (--platform-ref). */
   s014PlatformRef?: string;
   /** Evaluate an existing module rather than a new one (--existing-module), which relaxes some new-module rules. */
@@ -199,7 +200,6 @@ export interface EvaluationConfig {
   allowRemoteLookups?: boolean;
   /** Replaces the remote-evidence transport, like commandRunner; implies remote lookups are allowed. */
   remoteLookups?: import('./remote-evidence').RemoteLookups;
-  s014Application?: string;
   s014PlatformRef?: string;
   /** Evaluate an existing module rather than a new one (--existing-module). */
   existingModule?: boolean;
@@ -255,6 +255,36 @@ export interface CriterionAgentReviewMetadata {
   promptInputSanitized: boolean;
   reviewWorkspaceSanitized: boolean;
   retainedWorkspacePath?: string;
+  /** Content-free account of a failed or timed-out OpenCode review run, from its captured events. */
+  runDiagnosis?: CriterionAgentRunDiagnosis;
+  /** What the OpenCode review run used, summed over its finished model steps. */
+  usage?: CriterionAgentUsage;
+}
+
+export interface CriterionAgentUsage {
+  durationMs: number;
+  modelSteps: number;
+  tokens: { input: number; output: number; reasoning: number; cacheRead: number };
+  /** As OpenCode reports it from its models.dev pricing; absent when the catalog could not be refreshed or no step reported a cost. */
+  costUsd?: number;
+}
+
+export interface CriterionAgentRunDiagnosis {
+  /** Where the run was when it stopped, in plain words. */
+  summary: string;
+  events: number;
+  stepsStarted: number;
+  stepsFinished: number;
+  /** Completed or failed tool calls by allowlisted tool name; unknown names count as `other`. */
+  toolCalls: Record<string, number>;
+  toolErrors: number;
+  answerTextParts: number;
+  lastEvent?: string;
+  firstOutputMs?: number;
+  /** Time between the last output and the end of the command. */
+  silentMs?: number;
+  outputTruncated: boolean;
+  tokens?: CriterionAgentUsage['tokens'];
 }
 
 export interface CriterionAgentReviewResult {
@@ -327,6 +357,8 @@ export interface CriterionAgentReviewConfig {
   fakeResult?: CriterionAgentReviewResult;
   generatedProvider?: CriterionAgentGeneratedProvider;
   providerConfigError?: string;
+  /** Set by reviewCriterionWithAgent to the status the tool decided. */
+  deterministicStatus?: EvaluationStatus;
   /** Set per run by reviewCriterionWithAgent so a run's reviews share one committed-source read. */
   readRepositorySnapshot?: () => Promise<import('../utils/committed-source').CommittedSourceSnapshot>;
 }
