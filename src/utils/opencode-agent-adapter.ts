@@ -18,7 +18,6 @@ import {
   PreparedCriterionReviewWorkspace
 } from './criterion-agent-review';
 import { redactEvaluatorSecrets } from './redaction';
-import { StringDecoder } from 'string_decoder';
 import { getLogger } from './logger';
 import { decodeOpenCodeOutput, openCodeEventTrace, OpenCodeEventTrace, OpenCodeOutput, openCodeOutputTraces, parseJsonObject } from './opencode-output';
 import { errorMessage } from './type-guards';
@@ -32,6 +31,8 @@ const FAIL_INSTRUCTION = 'The tool failed this criterion on its own findings, an
 const HEARTBEAT_INTERVAL_MS = 30_000;
 // A review that writes nothing for this long is treated as stalled, however much of its timeout remains.
 const REVIEW_IDLE_TIMEOUT_MS = 300_000;
+// opencode debug config, debug agent and models --refresh check the setup and fetch the price catalog; none runs the review.
+const SETUP_STAGE_TIMEOUT_MS = 120_000;
 
 export async function runOpenCodeAgentReview(
   request: CriterionAgentReviewRequest,
@@ -113,7 +114,7 @@ export async function runOpenCodeAgentReview(
     args: ['debug', 'config'],
     cwd: workspace.rootPath,
     env: invocation.debugEnv,
-    timeoutMs: config.timeoutMs,
+    timeoutMs: Math.min(SETUP_STAGE_TIMEOUT_MS, timeoutMs),
     stdoutFormat: 'json'
   });
   if (configDebug.status !== 'success' || configDebug.stdoutTruncated) {
@@ -125,7 +126,7 @@ export async function runOpenCodeAgentReview(
     args: ['debug', 'agent', config.readOnlyAgentName],
     cwd: workspace.rootPath,
     env: invocation.debugEnv,
-    timeoutMs: config.timeoutMs,
+    timeoutMs: Math.min(SETUP_STAGE_TIMEOUT_MS, timeoutMs),
     stdoutFormat: 'json'
   });
   if (agentDebug.status !== 'success' || agentDebug.stdoutTruncated) {
@@ -143,7 +144,7 @@ export async function runOpenCodeAgentReview(
     args: ['models', config.modelLabel.split('/')[0], '--refresh'],
     cwd: workspace.rootPath,
     env: invocation.debugEnv,
-    timeoutMs: config.timeoutMs
+    timeoutMs: Math.min(SETUP_STAGE_TIMEOUT_MS, timeoutMs)
   });
 
   const heartbeat = reviewHeartbeat(request.criterionId, timeoutMs);
@@ -177,7 +178,7 @@ export async function runOpenCodeAgentReview(
     cwd: workspace.rootPath,
     env: invocation.env,
     timeoutMs: config.timeoutMs,
-    idleTimeoutMs: Math.min(REVIEW_IDLE_TIMEOUT_MS, timeoutMs),
+    idleTimeoutMs: Math.min(config.idleTimeoutMs ?? REVIEW_IDLE_TIMEOUT_MS, timeoutMs),
     stdoutFormat: 'opencode-json',
     maxOutputBytes: OPENCODE_RUN_MAX_OUTPUT_BYTES,
     keepStdoutTail: true,
@@ -220,7 +221,6 @@ export async function runOpenCodeAgentReview(
  */
 function reviewHeartbeat(criterionId: string, timeoutMs: number): { onStdout: (chunk: Buffer) => void; stop: () => void } {
   const started = Date.now();
-  const decoder = new StringDecoder('utf8');
   let lastOutput = started;
   let pending = '';
   let steps = 0;
@@ -228,7 +228,8 @@ function reviewHeartbeat(criterionId: string, timeoutMs: number): { onStdout: (c
   let lastTool: string | undefined;
   const onStdout = (chunk: Buffer) => {
     lastOutput = Date.now();
-    const lines = (pending + decoder.write(chunk)).split('\n');
+    // A character split across chunks decodes to replacement characters inside a JSON string, which counting ignores.
+    const lines = (pending + chunk.toString('utf8')).split('\n');
     pending = lines.pop() ?? '';
     // A line too long to be an event header is not worth holding; its event is not counted.
     if (pending.length > 1024 * 1024) pending = '';

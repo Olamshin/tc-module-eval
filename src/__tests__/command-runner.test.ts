@@ -1,3 +1,4 @@
+import childProcess = require('child_process');
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -181,27 +182,85 @@ describe('CommandRunner', () => {
     expect([silent.firstStdoutMs, silent.lastStdoutMs]).toEqual([undefined, undefined]);
   });
 
-  it('stops a command that goes quiet for the idle timeout, counting output on either stream as activity', async () => {
-    const runner = new LocalCommandRunner(true);
-    // One stdout write, then stderr alone for about 0.9 s, longer than the idle limit, then quiet.
-    const child = 'let n = 0; const t = setInterval(() => { (n ? process.stderr : process.stdout).write("x"); if (++n === 12) clearInterval(t); }, 80); setTimeout(() => {}, 20000)';
-    const result = await runner.run({ command: 'node', args: ['-e', child], cwd: process.cwd(), timeoutMs: 15000, idleTimeoutMs: 500 });
+  describe('idle timeout', () => {
+    // Fake timers decide when the runner's timers fire; the child runs for real. Each step waits until the runner has
+    // seen the child's output: stdout through onStdout, stderr through a listener added after the runner's own.
+    let received: { stdout: string; stderr: string };
+    let settled: boolean;
+    beforeEach(() => {
+      received = { stdout: '', stderr: '' };
+      settled = false;
+      const spawn = childProcess.spawn;
+      jest.spyOn(childProcess, 'spawn').mockImplementation(((...args: Parameters<typeof spawn>) => {
+        const child = spawn(...args);
+        setImmediate(() => child.stderr?.on('data', chunk => { received.stderr += String(chunk); }));
+        return child;
+      }) as typeof spawn);
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    });
+    // Fake timers also hold Jest's own test timeout, so a wait gives up when the command has already ended.
+    const until = async (condition: () => boolean): Promise<void> => {
+      while (!condition()) {
+        if (settled) throw new Error(`The command ended early: ${JSON.stringify(received)}`);
+        await delay(5);
+      }
+    };
+    const run = (child: string, timeoutMs: number, idleTimeoutMs: number) => {
+      const pending = new LocalCommandRunner(true).run({
+        command: 'node', args: ['-e', child], cwd: process.cwd(), timeoutMs, idleTimeoutMs,
+        onStdout: chunk => { received.stdout += String(chunk); }
+      });
+      void pending.then(() => { settled = true; });
+      return pending;
+    };
 
-    expect(result.status).toBe('timed_out');
-    expect(result.idleTimedOut).toBe(true);
-    expect(result.stdout).toBe('x');
-    expect(result.errorMessage).toBe('Command wrote no output for 500ms, so it was stopped before its 15000ms timeout: xxxxxxxxxxx');
-  });
+    it('stops a command that goes quiet, counting stderr output as activity', async () => {
+      const pending = run('process.stdout.write("x"); let n = 0; const t = setInterval(() => { process.stderr.write("e"); if (++n === 4) clearInterval(t); }, 50); setInterval(() => {}, 1000)', 15000, 500);
+      await until(() => received.stdout === 'x');
+      for (let count = 1; count <= 3; count++) {
+        await until(() => received.stderr.length >= count);
+        jest.advanceTimersByTime(400);
+      }
+      await until(() => received.stderr.length === 4);
+      jest.advanceTimersByTime(500);
+      const result = await pending;
 
-  it('leaves the overall timeout to report a command that keeps writing', async () => {
-    const runner = new LocalCommandRunner(true);
-    const result = await runner.run({
-      command: 'node', args: ['-e', 'setInterval(() => process.stdout.write("x"), 20)'], cwd: process.cwd(), timeoutMs: 300, idleTimeoutMs: 250
+      expect(result.status).toBe('timed_out');
+      expect(result.idleTimedOut).toBe(true);
+      expect(result.stdout).toBe('x');
+      expect(result.errorMessage).toBe('Command wrote no output for 500ms, so it was stopped before its 15000ms timeout: eeee');
     });
 
-    expect(result.status).toBe('timed_out');
-    expect(result.idleTimedOut).toBeUndefined();
-    expect(result.errorMessage).toContain('Command timed out after 300ms');
+    it('leaves the overall timeout to report a command that keeps writing', async () => {
+      const pending = run('setInterval(() => process.stdout.write("x"), 20)', 1000, 500);
+      for (let step = 1; step <= 4; step++) {
+        const seen = received.stdout.length;
+        await until(() => received.stdout.length > seen);
+        jest.advanceTimersByTime(250);
+      }
+      const result = await pending;
+
+      expect(result.status).toBe('timed_out');
+      expect(result.idleTimedOut).toBeUndefined();
+      expect(result.errorMessage).toBe('Command timed out after 1000ms (signal: SIGTERM)');
+    });
+
+    it('reports the overall timeout when the idle limit passes while a stopped command is still exiting', async () => {
+      const pending = run('process.on("SIGTERM", () => {}); process.stdout.write("x"); setInterval(() => {}, 1000)', 100, 400);
+      await until(() => received.stdout === 'x');
+      jest.advanceTimersByTime(100);
+      // SIGKILL follows at 350 ms; the idle limit would pass at 400 ms, before the runner sees the child exit.
+      jest.advanceTimersByTime(300);
+      const result = await pending;
+
+      expect(result.idleTimedOut).toBeUndefined();
+      expect(result.signal).toBe('SIGKILL');
+      expect(result.errorMessage).toBe('Command timed out after 100ms plus 300ms grace (400ms elapsed) (signal: SIGKILL)');
+    });
   });
 
   it('should force-complete timed out commands that ignore SIGTERM', async () => {

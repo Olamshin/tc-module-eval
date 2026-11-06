@@ -352,6 +352,8 @@ export interface CriterionAgentReviewConfig {
   modelLabel?: string;
   readOnlyAgentName?: string;
   timeoutMs?: number;
+  /** Stops a review run that writes no output for this long (--criterion-agent-idle-timeout-ms); 300 s unless given. */
+  idleTimeoutMs?: number;
   trustedConfigPath?: string;
   trustedAuthStorePath?: string;
   providerEnvAllowlist?: string[];

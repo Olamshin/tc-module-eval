@@ -84,7 +84,7 @@ export type BackendAgentReviewOptions = Omit<FrontendAgentReviewOptions, 'browse
 
 /**
  * A B00x agent review request: the F00x contract (checklist obligations, 48 KB evidence summary, example response,
- * item-by-item validation that drops an invalid item on its own) with the backend browse scope and the 600 s default
+ * item-by-item validation that drops an invalid item on its own) with the backend browse scope and the 900 s default
  * timeout.
  */
 export function buildBackendAgentReviewRequest(options: BackendAgentReviewOptions): CriterionAgentReviewRequest {

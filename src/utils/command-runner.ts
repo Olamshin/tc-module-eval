@@ -168,6 +168,7 @@ export class LocalCommandRunner implements CommandRunner {
       };
 
       const stop = (): void => {
+        clearTimeout(idleTimeout);
         child.kill('SIGTERM');
         forceKillTimeout = setTimeout(() => {
           forcedSignal = 'SIGKILL';
@@ -178,6 +179,7 @@ export class LocalCommandRunner implements CommandRunner {
         if (!request.idleTimeoutMs || timedOut) return;
         clearTimeout(idleTimeout);
         idleTimeout = setTimeout(() => {
+          if (timedOut) return;
           timedOut = true;
           idleTimedOut = true;
           stop();
