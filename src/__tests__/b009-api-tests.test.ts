@@ -310,6 +310,12 @@ describe('B009 API tests in a supported technology', () => {
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
     expect(result.evidence).toBe('B009 manual: The tool could not read every file in the repository that would show API tests. A reviewer or an agent must check the module\'s API tests.');
+
+    const both = await b009(backendModule('mod-user', { 'src/test/resources/big.feature': `Feature: big\n${'# x\n'.repeat(80_000)}` }),
+      { responses: { [LISTING]: { status: 403, body: { message: 'API rate limit exceeded' } } } });
+    expect(both.result.evidence).toBe('B009 manual: The tool could not read every file in the repository that would show API tests. '
+      + 'The tool could not look in folio-integration-tests: The top-level listing of folio-integration-tests could not be read (HTTP 403.). '
+      + 'This lookup failure does not mean API tests are missing or failing. A reviewer or an agent must check the module\'s API tests, including folio-integration-tests.');
     expect(details.slice(details.indexOf('What the tool could not read:'), details.indexOf('What the tool could not read:') + 2)).toEqual([
       'What the tool could not read:',
       '  - src/test/resources/big.feature — Committed file exceeds the 262144-byte per-file limit'
