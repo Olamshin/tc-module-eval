@@ -253,6 +253,32 @@ describe('B003 endpoint implementations', () => {
     ]);
   });
 
+  it('leaves a wildcard handler to the reviewer when an operation under it is not implemented, though others are', async () => {
+    const root = repository({
+      'pom.xml': useTags(true),
+      ...springApp,
+      'descriptors/ModuleDescriptor-template.json': descriptor([[['GET'], '/notes*'], [['GET'], '/items*']]),
+      'src/main/resources/swagger.api/notes.yaml': 'openapi: 3.0.0\npaths:\n  /notes:\n    get:\n      operationId: getNotes\n      tags: [notes]\n'
+        + '  /notes/{id}:\n    get:\n      operationId: getNote\n      tags: [notes]\n  /notes/{id}/links:\n    get:\n      operationId: getLinks\n      tags: [links]\n'
+        + '  /items:\n    get:\n      operationId: getItems\n      tags: [items]\n',
+      'src/main/java/org/example/NotesController.java': 'public class NotesController implements NotesApi, ItemsApi {\n  // getNote() is not overridden\n'
+        + '  public ResponseEntity<Notes> getNotes() { return null; }\n  public ResponseEntity<Items> getItems() { return null; }\n}\n',
+      'src/main/java/org/example/Links.java': '@RequestMapping("/")\npublic class Links {\n  @GetMapping("/notes/{id}/links") void links() {}\n}\n'
+    });
+
+    const { result, analysis } = await b003(root);
+
+    expect(implementations(analysis)).toEqual({ 'GET /notes*': 'wildcard', 'GET /items*': 'interface' });
+    expect(analysis.endpoints[0]).toEqual({ method: 'GET', path: '/notes*', interfaceId: 'example', implementation: 'wildcard', specFiles: ['src/main/resources/swagger.api/notes.yaml'],
+      unimplementedOperations: ['GET /notes/{id}'], implementedBy: [{ file: 'src/main/java/org/example/NotesController.java', line: 1 }] });
+    expect(result.status).toBe(EvaluationStatus.MANUAL);
+    expect(result.evidence).toBe('B003 manual: 1 of the 2 endpoints in the module descriptor has a wildcard path under which the tool found API spec operations '
+      + 'that no committed class or route implements: GET /notes*. A reviewer must check it.');
+    expect(analysis.checklist.items[0].startingPoints).toEqual([
+      { path: 'descriptors/ModuleDescriptor-template.json', line: 1, note: 'GET /notes*: a wildcard path under which no committed class or route implements GET /notes/{id}' }
+    ]);
+  });
+
   it('matches a wildcard handler only by the method it names, and to a route under it', async () => {
     const root = repository({
       'pom.xml': pom('mod-example', restVerticleBuild),

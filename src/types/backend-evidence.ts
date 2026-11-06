@@ -264,6 +264,8 @@ export interface B003Endpoint {
    * (`/*`), or matching every wildcard would exceed the work limit.
    */
   unmatchedWildcard?: 'whole-api' | 'work-limit';
+  /** The spec operations under a `wildcard` that no committed class or route implements, when others under it are implemented. */
+  unimplementedOperations?: string[];
 }
 
 /**
