@@ -58,7 +58,7 @@ export interface CommandExecutionRequest {
   args?: string[];
   cwd: string;
   timeoutMs?: number;
-  /** Stops the command when it writes nothing to stdout or stderr for this long. */
+  /** Stops the command when it writes nothing to stdout or stderr for this long; ignored unless shorter than timeoutMs. */
   idleTimeoutMs?: number;
   maxOutputBytes?: number;
   /** When stdout exceeds maxOutputBytes, keep its last complete lines instead of its first bytes. */

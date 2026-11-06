@@ -1103,6 +1103,11 @@ else {
         context(0),
         'OpenCode run diagnosis: no output from OpenCode before the timeout (likely provider or startup problem)'
       ]],
+      ['no output before the idle limit', '', { ...timedOut, stdoutBytes: 0, durationMs: 60090, idleTimedOut: true,
+        errorMessage: 'Command wrote no output for 60000ms, so it was stopped before its 120000ms timeout' }, [
+        'OpenCode run: 60090ms elapsed; timeout 120000ms; model test-model; stdout 0 bytes; stderr 0 bytes; stalled; Command wrote no output for 60000ms, so it was stopped before its 120000ms timeout',
+        'OpenCode run diagnosis: no output from OpenCode before the idle limit (likely provider or startup problem)'
+      ]],
       ['a long silence after a step started', capture(stepStart(1000, 'msg_1'), tool(2000, 'list'), stepFinish(3000, 'msg_1', 'tool-calls'),
         stepStart(4000, 'msg_2')), { ...timedOut, stdoutBytes: 2048, firstStdoutMs: 3100, lastStdoutMs: 25090 }, [
         context(2048),

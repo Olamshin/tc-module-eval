@@ -323,7 +323,7 @@ function diagnoseOpenCodeRun(run: CommandExecutionResult, events: OpenCodeEventT
   const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
   const summary = !last
     ? run.stdoutBytes ? 'no OpenCode events in the kept output'
-      : `no output from OpenCode before ${timedOut ? 'the timeout (likely provider or startup problem)' : 'it exited'}`
+      : `no output from OpenCode before ${timedOut ? `${run.idleTimedOut ? 'the idle limit' : 'the timeout'} (likely provider or startup problem)` : 'it exited'}`
     : last.type === 'error' ? 'OpenCode reported an error'
       : last.type === 'step_finish' && last.reason === 'stop'
         ? `the model finished its answer, but OpenCode ${timedOut ? 'did not exit' : 'then failed'}`

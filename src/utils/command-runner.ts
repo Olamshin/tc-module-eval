@@ -176,7 +176,7 @@ export class LocalCommandRunner implements CommandRunner {
         }, FORCE_KILL_GRACE_MS);
       };
       const resetIdle = (): void => {
-        if (!request.idleTimeoutMs || timedOut) return;
+        if (!request.idleTimeoutMs || request.idleTimeoutMs >= (request.timeoutMs ?? DEFAULT_TIMEOUT_MS) || timedOut) return;
         clearTimeout(idleTimeout);
         idleTimeout = setTimeout(() => {
           if (timedOut) return;
