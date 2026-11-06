@@ -499,6 +499,7 @@ export function createHtmlReport(result: EvaluationResult): string {
     // Reviewer notes are kept in this browser's localStorage, per repository and commit, and leave it only by export.
     var NOTES_FORMAT='tc-module-eval-review-notes';
     var DECISIONS=[['open','Open'],['met','Met'],['not_met','Not met']];
+    var NOTE_MAX_LENGTH=20000;
     var notesKey=NOTES_FORMAT+':'+data.meta.repo+'@'+(data.meta.commit||data.meta.evaluatedAt);
     var notes={},notesStored=true,saved=null;
     try{saved=window.localStorage.getItem(notesKey);}catch(error){notesStored=false;}
@@ -511,7 +512,7 @@ export function createHtmlReport(result: EvaluationResult): string {
         var entries=Object.prototype.hasOwnProperty.call(raw,item.id)&&raw[item.id];if(!reviewable(item)||!entries||typeof entries!=='object')return;
         reviewEntries(item).forEach(function(reviewEntry){
           var entry=Object.prototype.hasOwnProperty.call(entries,reviewEntry.id)&&entries[reviewEntry.id];if(!entry||typeof entry!=='object')return;
-          var decision=DECISIONS.some(function(option){return option[0]===entry.decision;})?entry.decision:'open',text=typeof entry.text==='string'?entry.text.slice(0,20000):'';
+          var decision=DECISIONS.some(function(option){return option[0]===entry.decision;})?entry.decision:'open',text=typeof entry.text==='string'?entry.text.slice(0,NOTE_MAX_LENGTH):'';
           if(decision==='open'&&!text.trim())return;
           (clean[item.id]=clean[item.id]||{})[reviewEntry.id]={decision:decision,text:text,updatedAt:typeof entry.updatedAt==='string'?entry.updatedAt:''};
         });
@@ -544,7 +545,7 @@ export function createHtmlReport(result: EvaluationResult): string {
         var select=h('select','note-select');select.setAttribute('aria-label','Decision for '+entry.id);focusKey(select,'note-decision-'+item.id+'-'+entry.id);
         DECISIONS.forEach(function(option){var node=h('option','',option[1]);node.value=option[0];select.appendChild(node);});select.value=current.decision;
         select.addEventListener('change',function(){setNote(item,entry.id,{decision:select.value});});
-        var text=h('textarea','note-text');text.value=current.text;text.placeholder='Evidence checked, what it showed, and what remains open';text.setAttribute('aria-label','Notes for '+entry.id);focusKey(text,'note-text-'+item.id+'-'+entry.id);
+        var text=h('textarea','note-text');text.maxLength=NOTE_MAX_LENGTH;text.value=current.text;text.placeholder='Evidence checked, what it showed, and what remains open';text.setAttribute('aria-label','Notes for '+entry.id);focusKey(text,'note-text-'+item.id+'-'+entry.id);
         text.addEventListener('input',function(){setNote(item,entry.id,{text:text.value});});
         head.appendChild(select);box.append(head,text);wrap.appendChild(box);
       });
@@ -629,7 +630,7 @@ export function createHtmlReport(result: EvaluationResult): string {
       var meta=h('div','meta'); meta.appendChild(h('span','',data.meta.language)); var repo=h('a','repo',data.meta.repo.replace(/^https?:\/\//,'')); repo.href=data.meta.repo; repo.target='_blank'; repo.rel='noopener noreferrer'; focusKey(repo,'repo'); meta.append(repo,h('span','','Evaluated '+data.meta.evaluatedAt));if(data.meta.commit)meta.appendChild(h('span','repo','Commit '+data.meta.commit.slice(0,12)));if(data.meta.evaluator)meta.appendChild(h('span','','Evaluator '+data.meta.evaluator.name+' '+data.meta.evaluator.version));if(data.meta.agentReviewModel)meta.appendChild(h('span','repo','Agent '+data.meta.agentReviewModel));if(data.meta.agentReviewCost)meta.appendChild(h('span','','Agent cost '+data.meta.agentReviewCost));titleBlock.appendChild(meta);
       var actions=h('div','actions');var download=h('button','action','Download JSON');download.type='button';focusKey(download,'download-json');download.addEventListener('click',function(){downloadFile(downloadData,data.meta.module+'-evaluation.json');});
       var exportNotes=h('button','action','Export notes');exportNotes.type='button';focusKey(exportNotes,'export-notes');exportNotes.addEventListener('click',function(){downloadFile(JSON.stringify({format:NOTES_FORMAT,version:1,module:data.meta.module,repo:data.meta.repo,commit:data.meta.commit||null,exportedAt:new Date().toISOString(),notes:notes},null,2),data.meta.module+'-review-notes.json');});
-      var notesFile=h('input');notesFile.type='file';notesFile.accept='application/json,.json';notesFile.hidden=true;notesFile.addEventListener('change',function(){if(notesFile.files&&notesFile.files[0])importNotesFile(notesFile.files[0]);});
+      var notesFile=h('input');notesFile.type='file';notesFile.accept='application/json,.json';notesFile.hidden=true;notesFile.addEventListener('change',function(){var file=notesFile.files&&notesFile.files[0];notesFile.value='';if(file)importNotesFile(file);});
       var importNotes=h('button','action','Import notes');importNotes.type='button';focusKey(importNotes,'import-notes');importNotes.addEventListener('click',function(){notesFile.click();});var expand=h('button','action','Expand criteria'); expand.type='button'; focusKey(expand,'expand-all'); expand.addEventListener('click',function () { items.forEach(function (item) { if(item.triage!=='human') state.cards[item.id]=true; }); state.groups={}; render(); });
       var collapse=h('button','action','Collapse criteria'); collapse.type='button'; focusKey(collapse,'collapse-all'); collapse.addEventListener('click',function () { state.cards={}; state.nodes={}; render(); }); actions.append(download,exportNotes,importNotes,notesFile,expand,collapse); titleRow.append(titleBlock,actions); header.appendChild(titleRow);
       if(items.some(reviewable))header.appendChild(h('div','notes-status'+(notesStored?'':' warn'),notesStatusText()));
