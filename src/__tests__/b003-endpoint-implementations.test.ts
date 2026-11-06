@@ -273,8 +273,8 @@ describe('B003 endpoint implementations', () => {
   it('does not match a wildcard that covers the whole API, gives no-implementing-class or library before wildcard', async () => {
     const root = repository({
       'pom.xml': `${pom('mod-example', restVerticleBuild)}<!-- org.folio:folio-custom-fields -->`,
-      'descriptors/ModuleDescriptor-template.json': descriptor([[['GET'], '/groups'], [['GET'], '/*'], [['GET'], '/{id}*'], [['POST'], '/notes*'], [['GET'], '/custom-fields/*']]),
-      'ramls/groups.raml': '#%RAML 1.0\ntitle: Groups\n/groups:\n  get:\n',
+      'descriptors/ModuleDescriptor-template.json': descriptor([[['GET'], '/groups'], [['GET'], '/*'], [['GET'], '/{id}*'], [['GET'], '/{id}/notes*'], [['POST'], '/notes*'], [['GET'], '/custom-fields/*']]),
+      'ramls/groups.raml': '#%RAML 1.0\ntitle: Groups\n/groups:\n  get:\n  /notes:\n    get:\n',
       'ramls/notes.raml': '#%RAML 1.0\ntitle: Notes\n/notes:\n  post:\n',
       'src/main/java/org/folio/rest/impl/GroupsAPI.java': 'public class GroupsAPI implements Groups {}\n'
     });
@@ -282,7 +282,8 @@ describe('B003 endpoint implementations', () => {
     const { analysis } = await b003(root);
 
     expect(implementations(analysis)).toEqual({
-      'GET /groups': 'interface', 'GET /*': 'wildcard', 'GET /{id}*': 'wildcard', 'POST /notes*': 'no-implementing-class', 'GET /custom-fields/*': 'library'
+      'GET /groups': 'interface', 'GET /*': 'wildcard', 'GET /{id}*': 'wildcard', 'GET /{id}/notes*': 'interface', 'POST /notes*': 'no-implementing-class',
+      'GET /custom-fields/*': 'library'
     });
     expect(analysis.checklist.items[0].startingPoints.filter(point => point.note.includes('wildcard'))).toEqual([
       { path: 'descriptors/ModuleDescriptor-template.json', line: 1, note: 'GET /*: a wildcard path that covers the whole API' },
@@ -545,6 +546,23 @@ describe('B003 endpoint implementations', () => {
     const { analysis } = await expectLinearTime(1_000, grails, root => b003(root));
 
     expect(implementations(analysis)).toEqual({ 'GET /m0': 'route' });
+  }, 120_000);
+
+  it('matches wildcard handlers to routes in linear time, leaving them to the reviewer past the work limit', async () => {
+    // Every route starts with each wildcard's literal prefix `/a`, so each wildcard is matched against every route.
+    const vertx = (size: number) => repository({
+      'pom.xml': pom('mod-example'),
+      ...vertxApp,
+      'descriptors/ModuleDescriptor-template.json': descriptor(Array.from({ length: size }, (_item, index): [string[], string] => [['GET'], `/a{p}/q${index}/wildcard*`])),
+      'src/main/java/org/example/Routes.java': `class Routes {\n${Array.from({ length: size }, (_item, index) => `router.get("/a${index}/r/route/path").handler(h);\n`).join('')}}\n`
+    });
+
+    const { analysis } = await expectLinearTime(250, vertx, root => b003(root));
+
+    expect(analysis.routeCount).toBe(1_000);
+    expect(new Set(analysis.endpoints.map(endpoint => `${endpoint.implementation} ${endpoint.unmatchedWildcard}`))).toEqual(new Set(['wildcard work-limit']));
+    expect(analysis.checklist.items[0].startingPoints[0]).toEqual({ path: 'descriptors/ModuleDescriptor-template.json', line: 1,
+      note: 'GET /a{p}/q0/wildcard*: a wildcard path not matched, because the API specs and routes have too many paths to match it against' });
   }, 120_000);
 
   describe('agent review', () => {

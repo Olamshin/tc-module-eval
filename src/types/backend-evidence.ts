@@ -259,8 +259,11 @@ export interface B003Endpoint {
   implementedBy?: Array<{ file: string; line: number }>;
   /** The library that serves it (`library`). */
   library?: string;
-  /** A `wildcard` right after the root, such as `/*`, which the tool does not match to operations under it. */
-  wholeApi?: true;
+  /**
+   * Why the tool did not match a `wildcard` to the operations and routes under it: it starts right after the root
+   * (`/*`), or matching every wildcard would exceed the work limit.
+   */
+  unmatchedWildcard?: 'whole-api' | 'work-limit';
 }
 
 /**
