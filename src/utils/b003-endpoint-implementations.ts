@@ -110,6 +110,8 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
       ({ method, path: endpointPath, ...(interfaceId ? { interfaceId } : {}), implementation, specFiles, ...extra });
     const location = (item: { file: string; line: number }) => ({ file: item.file, line: item.line });
 
+    // A wildcard right after the root (`/*`, `/{id}*`) covers the whole API, so any operation would count as its implementation.
+    if (matcher.wildcard && /^\/[*{]/.test(endpointPath)) return found('wildcard', [], { wholeApi: true });
     const spec = lookup(specIndex, matcher);
     const specFiles = unique([...(specFile ? [specFile] : []), ...spec.documented.map(entry => entry.file)]);
     const names = unique(spec.documented.flatMap(generated));
@@ -162,7 +164,7 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
     sentences.push(`${share(unrouted.length)} ${verb(unrouted.length)} in an API spec, but no route in the source serves ${unrouted.length === 1 ? 'it' : 'them'}: ${labels(unrouted)}.`);
   }
   if (wildcards.length) {
-    sentences.push(`${share(wildcards.length)} ${wildcards.length === 1 ? 'has a wildcard path' : 'have wildcard paths'} with no API spec operation or route under ${wildcards.length === 1 ? 'it' : 'them'}: ${labels(wildcards)}.`);
+    sentences.push(`${share(wildcards.length)} ${wildcards.length === 1 ? 'has a wildcard path' : 'have wildcard paths'} that the tool could not tie to an implementation: ${labels(wildcards)}.`);
   }
   if (fromLibrary.length) {
     const names = unique(fromLibrary.map(endpoint => endpoint.library!));
@@ -204,7 +206,9 @@ export function evaluateB003(evidence: BackendEvidence, apiSpecs: BackendApiSpec
   for (const endpoint of unspecified) point(endpoint, template.path, 'in no API spec and no route', handlerLine(endpoint));
   for (const endpoint of noClass) point(endpoint, endpoint.specFiles[0], `no committed class implements it through ${listText(endpoint.generatedInterfaces!)}`);
   for (const endpoint of unrouted) point(endpoint, endpoint.specFiles[0], 'no route in the source serves it');
-  for (const endpoint of wildcards) point(endpoint, template.path, 'a wildcard path with no API spec operation or route under it', handlerLine(endpoint));
+  for (const endpoint of wildcards) {
+    point(endpoint, template.path, endpoint.wholeApi ? 'a wildcard path that covers the whole API' : 'a wildcard path with no API spec operation or route under it', handlerLine(endpoint));
+  }
   for (const endpoint of fromLibrary) {
     const library = libraries.find(candidate => candidate.artifactId === endpoint.library)!;
     libraryPoints.push({ path: library.buildFile, ...(library.line ? { line: library.line } : {}), note: `${endpoint.method} ${endpoint.path}: served by ${endpoint.library}` });

@@ -246,8 +246,11 @@ describe('B003 endpoint implementations', () => {
 
     expect(implementations(analysis)).toEqual({ 'GET /groups': 'interface', 'POST /groups/{id}*': 'interface', 'GET /other*': 'wildcard' });
     expect(result.status).toBe(EvaluationStatus.MANUAL);
-    expect(result.evidence).toBe('B003 manual: 1 of the 3 endpoints in the module descriptor has a wildcard path with no API spec operation or route under it: '
+    expect(result.evidence).toBe('B003 manual: 1 of the 3 endpoints in the module descriptor has a wildcard path that the tool could not tie to an implementation: '
       + 'GET /other*. A reviewer must check it.');
+    expect(analysis.checklist.items[0].startingPoints).toEqual([
+      { path: 'descriptors/ModuleDescriptor-template.json', line: 1, note: 'GET /other*: a wildcard path with no API spec operation or route under it' }
+    ]);
   });
 
   it('matches a wildcard handler only by the method it names, and to a route under it', async () => {
@@ -263,6 +266,28 @@ describe('B003 endpoint implementations', () => {
 
     expect(implementations(analysis)).toEqual({ 'DELETE /groups/{id}*': 'wildcard', 'GET /notes*': 'route' });
     expect(result.status).toBe(EvaluationStatus.MANUAL);
+    expect(result.evidence).toBe('B003 manual: 1 of the 2 endpoints in the module descriptor has a wildcard path that the tool could not tie to an implementation: '
+      + 'DELETE /groups/{id}*. A reviewer must check it.');
+  });
+
+  it('does not match a wildcard that covers the whole API, gives no-implementing-class or library before wildcard', async () => {
+    const root = repository({
+      'pom.xml': `${pom('mod-example', restVerticleBuild)}<!-- org.folio:folio-custom-fields -->`,
+      'descriptors/ModuleDescriptor-template.json': descriptor([[['GET'], '/groups'], [['GET'], '/*'], [['GET'], '/{id}*'], [['POST'], '/notes*'], [['GET'], '/custom-fields/*']]),
+      'ramls/groups.raml': '#%RAML 1.0\ntitle: Groups\n/groups:\n  get:\n',
+      'ramls/notes.raml': '#%RAML 1.0\ntitle: Notes\n/notes:\n  post:\n',
+      'src/main/java/org/folio/rest/impl/GroupsAPI.java': 'public class GroupsAPI implements Groups {}\n'
+    });
+
+    const { analysis } = await b003(root);
+
+    expect(implementations(analysis)).toEqual({
+      'GET /groups': 'interface', 'GET /*': 'wildcard', 'GET /{id}*': 'wildcard', 'POST /notes*': 'no-implementing-class', 'GET /custom-fields/*': 'library'
+    });
+    expect(analysis.checklist.items[0].startingPoints.filter(point => point.note.includes('wildcard'))).toEqual([
+      { path: 'descriptors/ModuleDescriptor-template.json', line: 1, note: 'GET /*: a wildcard path that covers the whole API' },
+      { path: 'descriptors/ModuleDescriptor-template.json', line: 1, note: 'GET /{id}*: a wildcard path that covers the whole API' }
+    ]);
   });
 
   it('reads mod-circulation\'s RouteRegistration, chained or through a variable, and skips its own router calls', async () => {
@@ -441,7 +466,7 @@ describe('B003 endpoint implementations', () => {
     const { result, analysis } = await b003(root);
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
-    expect(result.evidence).toBe('B003 manual: 1 of the 2 endpoints in the module descriptor has a wildcard path with no API spec operation or route under it: GET /example/*. '
+    expect(result.evidence).toBe('B003 manual: 1 of the 2 endpoints in the module descriptor has a wildcard path that the tool could not tie to an implementation: GET /example/*. '
       + '1 of the 2 endpoints in the module descriptor comes from folio-custom-fields. The tool does not look inside that library, so it cannot confirm that the version the module uses implements it: GET /custom-fields/{id}. A reviewer must check them.');
     expect(analysis.checklist.items.map(item => [item.id, item.reviewerOnly, item.startingPoints])).toEqual([
       ['B003-C1', false, [{ path: 'descriptors/ModuleDescriptor-template.json', line: 25, note: 'GET /example/*: a wildcard path with no API spec operation or route under it' }]],
