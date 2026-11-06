@@ -520,8 +520,19 @@ export function createHtmlReport(result: EvaluationResult): string {
       return clean;
     }
     function notesStatusText(){return notesStored?'Reviewer notes are saved in this browser for this commit. Export them to share them or keep a copy.':'This browser cannot save reviewer notes. Export them before closing the page.';}
+    function shownEntry(criterionId,entryId){var item=items.find(function(candidate){return candidate.id===criterionId;});return !!item&&reviewable(item)&&reviewEntries(item).some(function(entry){return entry.id===entryId;});}
+    // A report of the same commit with other criteria shares the record, so its entries that this report does not show are kept.
+    function allNotes(){
+      var merged=Object.create(null),stored={};
+      try{var record=JSON.parse(window.localStorage.getItem(notesKey)||'null');if(record&&record.notes&&typeof record.notes==='object')stored=record.notes;}catch(error){stored={};}
+      var add=function(criterionId,entryId,entry){(merged[criterionId]=merged[criterionId]||Object.create(null))[entryId]=entry;};
+      Object.keys(stored).forEach(function(criterionId){var entries=stored[criterionId];if(!entries||typeof entries!=='object')return;
+        Object.keys(entries).forEach(function(entryId){if(entries[entryId]&&typeof entries[entryId]==='object'&&!shownEntry(criterionId,entryId))add(criterionId,entryId,entries[entryId]);});});
+      Object.keys(notes).forEach(function(criterionId){Object.keys(notes[criterionId]).forEach(function(entryId){add(criterionId,entryId,notes[criterionId][entryId]);});});
+      return merged;
+    }
     function saveNotes(){
-      try{window.localStorage.setItem(notesKey,JSON.stringify({format:NOTES_FORMAT,version:1,module:data.meta.module,repo:data.meta.repo,commit:data.meta.commit||null,notes:notes}));notesStored=true;}catch(error){notesStored=false;}
+      try{window.localStorage.setItem(notesKey,JSON.stringify({format:NOTES_FORMAT,version:1,module:data.meta.module,repo:data.meta.repo,commit:data.meta.commit||null,notes:allNotes()}));notesStored=true;}catch(error){notesStored=false;}
       var status=document.querySelector('.notes-status');if(status){status.textContent=notesStatusText();status.className='notes-status'+(notesStored?'':' warn');}
     }
     function setNote(item,entryId,change){
@@ -629,7 +640,7 @@ export function createHtmlReport(result: EvaluationResult): string {
       var header=h('header','report-header'); var titleRow=h('div','title-row'); var titleBlock=h('div'); titleBlock.appendChild(h('h1','',data.meta.module));
       var meta=h('div','meta'); meta.appendChild(h('span','',data.meta.language)); var repo=h('a','repo',data.meta.repo.replace(/^https?:\/\//,'')); repo.href=data.meta.repo; repo.target='_blank'; repo.rel='noopener noreferrer'; focusKey(repo,'repo'); meta.append(repo,h('span','','Evaluated '+data.meta.evaluatedAt));if(data.meta.commit)meta.appendChild(h('span','repo','Commit '+data.meta.commit.slice(0,12)));if(data.meta.evaluator)meta.appendChild(h('span','','Evaluator '+data.meta.evaluator.name+' '+data.meta.evaluator.version));if(data.meta.agentReviewModel)meta.appendChild(h('span','repo','Agent '+data.meta.agentReviewModel));if(data.meta.agentReviewCost)meta.appendChild(h('span','','Agent cost '+data.meta.agentReviewCost));titleBlock.appendChild(meta);
       var actions=h('div','actions');var download=h('button','action','Download JSON');download.type='button';focusKey(download,'download-json');download.addEventListener('click',function(){downloadFile(downloadData,data.meta.module+'-evaluation.json');});
-      var exportNotes=h('button','action','Export notes');exportNotes.type='button';focusKey(exportNotes,'export-notes');exportNotes.addEventListener('click',function(){downloadFile(JSON.stringify({format:NOTES_FORMAT,version:1,module:data.meta.module,repo:data.meta.repo,commit:data.meta.commit||null,exportedAt:new Date().toISOString(),notes:notes},null,2),data.meta.module+'-review-notes.json');});
+      var exportNotes=h('button','action','Export notes');exportNotes.type='button';focusKey(exportNotes,'export-notes');exportNotes.addEventListener('click',function(){downloadFile(JSON.stringify({format:NOTES_FORMAT,version:1,module:data.meta.module,repo:data.meta.repo,commit:data.meta.commit||null,exportedAt:new Date().toISOString(),notes:allNotes()},null,2),data.meta.module+'-review-notes.json');});
       var notesFile=h('input');notesFile.type='file';notesFile.accept='application/json,.json';notesFile.hidden=true;notesFile.addEventListener('change',function(){var file=notesFile.files&&notesFile.files[0];notesFile.value='';if(file)importNotesFile(file);});
       var importNotes=h('button','action','Import notes');importNotes.type='button';focusKey(importNotes,'import-notes');importNotes.addEventListener('click',function(){notesFile.click();});var expand=h('button','action','Expand criteria'); expand.type='button'; focusKey(expand,'expand-all'); expand.addEventListener('click',function () { items.forEach(function (item) { if(item.triage!=='human') state.cards[item.id]=true; }); state.groups={}; render(); });
       var collapse=h('button','action','Collapse criteria'); collapse.type='button'; focusKey(collapse,'collapse-all'); collapse.addEventListener('click',function () { state.cards={}; state.nodes={}; render(); }); actions.append(download,exportNotes,importNotes,notesFile,expand,collapse); titleRow.append(titleBlock,actions); header.appendChild(titleRow);
