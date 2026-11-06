@@ -99,7 +99,7 @@ describe('B009 API tests in a supported technology', () => {
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
     expect(result.evidence).toBe('B009 manual: The tool could not look in folio-integration-tests: The entry named git in folio-integration-tests is not a folder. '
-      + 'B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer or an agent must check the module\'s API tests, including folio-integration-tests.');
+      + 'B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer must check the module\'s API tests, including folio-integration-tests.');
     expect(requested).toEqual([LISTING]);
   });
 
@@ -109,7 +109,7 @@ describe('B009 API tests in a supported technology', () => {
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
     expect(result.evidence).toBe('B009 manual: The tool could not look in folio-integration-tests: Neither the module descriptor, pom.xml nor the repository name gives a FOLIO module name. '
-      + 'B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer or an agent must check the module\'s API tests, including folio-integration-tests.');
+      + 'B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer must check the module\'s API tests, including folio-integration-tests.');
     expect(requested).toEqual([]);
     expect(details.slice(5)).toEqual([
       'folio-integration-tests (only a folder named after the module is searched):',
@@ -295,13 +295,13 @@ describe('B009 API tests in a supported technology', () => {
     for (const [, responses, problem] of cases) {
       const { result, analysis } = await b009(backendModule('mod-x'), { responses });
       expect(result.status).toBe(EvaluationStatus.MANUAL);
-      expect(result.evidence).toBe(`B009 manual: The tool could not look in folio-integration-tests: ${problem} B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer or an agent must check the module's API tests, including folio-integration-tests.`);
+      expect(result.evidence).toBe(`B009 manual: The tool could not look in folio-integration-tests: ${problem} B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer must check the module's API tests, including folio-integration-tests.`);
       expect(analysis.checklist.items.map(item => item.id)).toEqual(['B009-C2']);
     }
 
     const karate = await b009(backendModule('mod-x', { 'src/test/resources/users.feature': KARATE_FEATURE }), { responses: cases[0][1] });
     expect(karate.result.status).toBe(EvaluationStatus.MANUAL);
-    expect(karate.result.evidence).toBe(`B009 manual: The repository has Karate API tests (1 .feature file). The tool could not look in folio-integration-tests: ${cases[0][2]} B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer or an agent must check the module's API tests, including folio-integration-tests.`);
+    expect(karate.result.evidence).toBe(`B009 manual: The repository has Karate API tests (1 .feature file). The tool could not look in folio-integration-tests: ${cases[0][2]} B009 is manual because of this lookup, not because API tests are missing or failing. A reviewer must check the module's API tests, including folio-integration-tests.`);
     expect(karate.rows).toContain(`  - ${LISTING} (fetched <time>; HTTP 403.)`);
   });
 
@@ -309,13 +309,13 @@ describe('B009 API tests in a supported technology', () => {
     const { result, rows: details } = await b009(backendModule('mod-user', { 'src/test/resources/big.feature': `Feature: big\n${'# x\n'.repeat(80_000)}` }), { responses: INTEGRATION_TESTS });
 
     expect(result.status).toBe(EvaluationStatus.MANUAL);
-    expect(result.evidence).toBe('B009 manual: The tool could not read every file in the repository that would show API tests. A reviewer or an agent must check the module\'s API tests.');
+    expect(result.evidence).toBe('B009 manual: The tool could not read every file in the repository that would show API tests. A reviewer must check the module\'s API tests.');
 
     const both = await b009(backendModule('mod-user', { 'src/test/resources/big.feature': `Feature: big\n${'# x\n'.repeat(80_000)}` }),
       { responses: { [LISTING]: { status: 403, body: { message: 'API rate limit exceeded' } } } });
     expect(both.result.evidence).toBe('B009 manual: The tool could not read every file in the repository that would show API tests. '
       + 'The tool could not look in folio-integration-tests: The top-level listing of folio-integration-tests could not be read (HTTP 403.). '
-      + 'This lookup failure does not mean API tests are missing or failing. A reviewer or an agent must check the module\'s API tests, including folio-integration-tests.');
+      + 'This lookup failure does not mean API tests are missing or failing. A reviewer must check the module\'s API tests, including folio-integration-tests.');
     expect(details.slice(details.indexOf('What the tool could not read:'), details.indexOf('What the tool could not read:') + 2)).toEqual([
       'What the tool could not read:',
       '  - src/test/resources/big.feature — Committed file exceeds the 262144-byte per-file limit'

@@ -182,7 +182,7 @@ export function evaluateB009(inputs: B009Inputs): B009Analysis {
       [...(supported.length ? [foundText(supported, integrationTests?.folder)] : []), ...sentences, ...problems, ...lookupNote(false), 'A reviewer must check which framework the API tests use.'].join(' '));
   }
   if (problems.length) {
-    return result(EvaluationStatus.MANUAL, 'incomplete', [...(found ? [found] : []), ...problems, ...lookupNote(problems.length === 1), `A reviewer or an agent must check the module's API tests${lookupFailed ? ', including folio-integration-tests' : ''}.`].join(' '));
+    return result(EvaluationStatus.MANUAL, 'incomplete', [...(found ? [found] : []), ...problems, ...lookupNote(problems.length === 1), `A reviewer must check the module's API tests${lookupFailed ? ', including folio-integration-tests' : ''}.`].join(' '));
   }
   if (suites.length) {
     return result(EvaluationStatus.PASS, 'karate', [
