@@ -6,6 +6,7 @@ import { s010AgentReviewNames } from './s010-report-details';
 import { s011AgentReviewNames } from './s011-evaluator';
 import { citedTrackedFiles } from '../module-evaluator';
 import { AGENT_REVIEW_CRITERIA } from './criterion-agent-review';
+import { getAcceptanceCriterionDefinition } from '../criteria-definitions';
 import { CHECKLIST_HEADING, frontendChecklistOf, renderFrontendAgentReviewLines, renderFrontendChecklistLines } from './frontend-checklist';
 
 const CRITERION_TITLES: Record<string, string> = {
@@ -294,6 +295,7 @@ export function createHtmlReport(result: EvaluationResult): string {
       return {
         id: criterion.criterionId,
         title: criterionTitle(criterion.criterionId, criterion.evidence),
+        description: getAcceptanceCriterionDefinition(criterion.criterionId)?.summary,
         status: criterion.status,
         evidence: criterion.evidence,
         details,
@@ -485,10 +487,10 @@ export function createHtmlReport(result: EvaluationResult): string {
       }
       var allDetails = item.details.join(' ');
       return {
-        id:item.id,title:item.title,status:item.status,evidence:evidence,summary:evidence,tree:tree,
+        id:item.id,title:item.title,description:item.description,status:item.status,evidence:evidence,summary:evidence,tree:tree,
         recommendation:item.recommendation,category:category(item.id),subtitle:item.id === 'A001' ? item.evidence : '',reviewItems:item.reviewItems||[],
         triage:item.status === 'pass' ? 'passed' : human ? 'human' : 'review',
-        search:(item.id+' '+item.title+' '+item.evidence+' '+allDetails).toLowerCase()
+        search:(item.id+' '+item.title+' '+(item.description||'')+' '+item.evidence+' '+allDetails).toLowerCase()
       };
     }
     var items = data.items.map(prepare);
@@ -697,7 +699,7 @@ export function createHtmlReport(result: EvaluationResult): string {
     function renderCard(group,item) {
       var open=!!state.cards[item.id],selected=state.focus===item.id&&state.keyboard,t=item.status in tone?tone[item.status]:tone.not_applicable;
       var card=h('article','card'+(selected?' selected':''));card.id='c-'+item.id;var toggle=h('button','card-toggle');toggle.type='button';focusKey(toggle,'card-'+item.id);toggle.setAttribute('aria-expanded',String(open));toggle.append(chevron(open),h('span','criterion-id',item.id));
-      var copy=h('span','card-copy');copy.append(h('span','card-title',item.title),h('span','card-summary',item.summary));toggle.appendChild(copy);var badges=h('span','badges');var rec=recommendations[item.recommendation];if(rec){var agent=h('span','agent','agent · '+rec.label);agent.style.color=rec.fg;agent.style.borderColor=rec.line;badges.appendChild(agent);}if(reviewable(item))badges.appendChild(reviewBadge(item));var pill=h('span','pill',t.label);pill.style.background=t.bg;pill.style.color=t.fg;badges.appendChild(pill);toggle.appendChild(badges);
+      var copy=h('span','card-copy');copy.append(h('span','card-title',item.title),h('span','card-summary',item.description||item.summary));toggle.appendChild(copy);var badges=h('span','badges');var rec=recommendations[item.recommendation];if(rec){var agent=h('span','agent','agent · '+rec.label);agent.style.color=rec.fg;agent.style.borderColor=rec.line;badges.appendChild(agent);}if(reviewable(item))badges.appendChild(reviewBadge(item));var pill=h('span','pill',t.label);pill.style.background=t.bg;pill.style.color=t.fg;badges.appendChild(pill);toggle.appendChild(badges);
       toggle.addEventListener('click',function(){setFocus(item.id,false);state.cards[item.id]=!open;render();});card.appendChild(toggle);
       if(open){var body=h('div','card-body');var evidence=h('div','evidence');evidence.append(h('div','label','Evidence'),h('div','evidence-text',item.evidence));body.appendChild(evidence);renderNodes(body,item.tree,0,item.id);if(reviewable(item)){var notesHeading=h('div','section-row notes-heading');notesHeading.append(h('span','section-label','Reviewer notes'),h('span','section-line'));body.appendChild(notesHeading);renderNotes(body,item);}card.appendChild(body);}return card;
     }
