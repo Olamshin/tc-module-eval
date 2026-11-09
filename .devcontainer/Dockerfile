@@ -104,7 +104,7 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 
 # Install OpenCode for criterion-agent advisory reviews
-ARG OPENCODE_VERSION=1.17.11
+ARG OPENCODE_VERSION=1.19.5
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}"
 
 # Set the default shell to zsh rather than sh
