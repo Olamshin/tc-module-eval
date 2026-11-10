@@ -1,0 +1,328 @@
+# Criteria Overview
+
+Summaries of the criteria whose behavior depends on policy files, options or remote evidence. [Criterion Notes](criterion-notes.md) records the full behavior of every criterion; [FOLIO module acceptance criteria](https://github.com/folio-org/tech-council/blob/master/MODULE_ACCEPTANCE_CRITERIA.MD) defines them.
+
+Dependency analysis covers the dependencies a module distributes, including transitive ones, for Maven, Gradle, and npm projects; test-only and development dependencies are excluded. Go modules are not supported yet.
+
+## S007 Officially Supported Technologies
+
+S007 evaluates a module against the current policy committed at
+`config/officially-supported-technologies.json`. There is no policy selector and no
+separate policy per delivery train. Git history preserves prior policy states.
+
+By default, evaluation is static and read-only. It inspects local Maven and Gradle
+metadata, `package.json`, and a top-level Yarn Classic lockfile. With
+`--allow-local-commands`, Java evaluation may run the pinned Maven Help Plugin
+`effective-pom` goal to process remote parents and BOMs for otherwise unresolved
+dependency versions. Versions from a successfully validated, explicitly approved
+effective POM participate in normative policy comparisons; other remote-derived
+evidence remains diagnostic only. Default static S007 evaluation does not run a build,
+call Confluence, or modify the evaluated repository. The opt-in Maven command does not
+request a build lifecycle, but Maven model construction is not filesystem- or
+network-isolated and may modify a trusted repository; see
+[Criterion Notes](criterion-notes.md). A definitive violation of a normative rule fails.
+Unresolved, conflicting, advisory, provisional, contested, unlisted-framework, or
+incomplete evidence remains manual. Pass requires complete relevant evidence and
+compliance with every applicable definitive rule.
+
+To update the policy:
+
+1. Edit `config/officially-supported-technologies.json` in place. Do not add another
+   policy file or selector.
+2. Keep `formatVersion` aligned with
+   `src/schemas/officially-supported-technologies.schema.json`. Historical source
+   metadata is optional and does not affect status.
+3. Preserve normative strength, recommendations, provisional or contested wording,
+   applicability exceptions, deprecations, and reviewer notes explicitly.
+4. Run `yarn test --runInBand --testPathPattern=s007-policy` and `yarn build`.
+
+S007 consumes only applicable language and framework entries. S012 consumes the
+build-tool sections and S013 the testing sections; the infrastructure sections are kept
+for future criteria. See [Criterion Notes](criterion-notes.md) for reviewer guidance.
+
+## S010 Third-Party System Resilience
+
+S010 third-party resilience uses conservative committed-source checks for Java and
+Stripes/React modules. Difficult static cases remain manual and can use the optional
+agent review for broader cited analysis, for example
+`--criterion-agent-opencode --criterion-agent-criteria S010`. Agent advice never changes
+the deterministic status. See [Criterion Notes](criterion-notes.md#s010-third-party-system-resilience).
+
+## S011 SonarQube Findings
+
+S011 reads the module's SonarCloud analysis (`org.folio:<repository>`) and fails on any open
+security issue, unreviewed security hotspot, open high or blocker issue (test code included), or
+duplication above 3%. It also scans the repository and its CI for Sonar rule suppressions
+(`@SuppressWarnings`, `NOSONAR`) and exclusions, which a reviewer must judge. It needs
+`--allow-remote-lookups` and cannot pass unless `SONAR_TOKEN` can administer the SonarCloud
+project. See [Criterion Notes](criterion-notes.md#s011-sonarqube-findings).
+
+## S012 Officially Supported Build Tools
+
+S012 checks the tools that build the module (Maven, Gradle, Make, Yarn, npm, Node.js,
+and others) against the build-tool sections of the same policy. It reads build files
+and GitHub Actions workflows only, so it runs in safe mode without network access.
+When a repository pins no version, the versions FOLIO's shared workflows supply come
+from the maintainer-reviewed `config/folio-shared-workflows.json`. See
+[Criterion Notes](criterion-notes.md#s012-officially-supported-build-tools).
+
+## S013 Unit Test Coverage
+
+S013 reads the module's overall test coverage from SonarCloud, which must be at least 80%,
+and checks the test runners its build files declare (JUnit for Java, Jest for UI modules)
+against the testing sections of the same policy. It never runs tests, even with
+`--allow-local-commands`, and needs `--allow-remote-lookups` to read SonarCloud; without it
+S013 is `manual` and lists the test runners it found. See
+[Criterion Notes](criterion-notes.md#s013-unit-test-coverage).
+
+## F001 Consumed Interfaces Declared
+
+F001 checks that every backend interface a UI package calls is declared in `package.json` under
+`stripes.okapiInterfaces` or `stripes.optionalOkapiInterfaces`. It reads the request paths in the
+committed production source (stripes-connect manifests, `useOkapiKy()` calls and `fetch` on the Okapi
+URL, following constants inside the repository) and maps them to interfaces through the handler patterns
+of the S008 platform release, kept offline in `config/f001-handler-index.json`. A request that maps to
+one undeclared interface fails it, for modules and libraries alike; requests the tool cannot map leave it
+`manual`, with a checklist for the reviewer and, when agent review is enabled, the agent's results. See
+[Criterion Notes](criterion-notes.md#f001-consumed-interfaces-declared).
+
+## F002 End-to-End Tests
+
+F002 checks that a UI package's end-to-end tests, if it has any, use the supported technology: Cypress
+12.0 or later, which the officially supported technologies page lists as pending verification. It finds
+the tools from the committed `package.json`, `yarn.lock`, configuration files, test directories and what
+CI runs (GitHub workflows, including FOLIO's shared `ui.yml` test jobs, and the `Jenkinsfile`). Without
+browser test tooling it is not applicable; another end-to-end framework, such as Playwright, fails it;
+Karma or BigTest suites, which may be component tests, and Cypress below 12.0 are left `manual`, with a
+checklist for the reviewer and, when agent review is enabled, the agent's results. See
+[Criterion Notes](criterion-notes.md#f002-end-to-end-tests).
+
+## F003 Internationalization
+
+F003 checks that a UI package renders its text through react-intl from an English translation file,
+`translations/<namespace>/en.json`. It reads the committed production source (`src/`, `lib/` and
+root-level files, without tests or stories) and fails without react-intl or a valid `en.json`. Message
+ids missing from `en.json`, hard-coded user-visible text and invalid ICU messages make it `manual`,
+with a checklist for the reviewer and, when agent review is enabled, the agent's results per item. A
+package that renders no user interface, such as stripes-connect, is not applicable. See
+[Criterion Notes](criterion-notes.md#f003-internationalization).
+
+## F004 WCAG 2.1 AA Accessibility
+
+F004 checks that a UI package meets WCAG 2.1 AA as measured by a current major version of axe DevTools.
+The repository alone cannot show that, so F004 is always `manual` (and not applicable to a package that
+renders no user interface). It lists what a reviewer starts from: test files that use axe, whether the lint
+configuration uses `@folio/eslint-config-stripes`, `jsx-a11y` rules disabled in code or configuration,
+`<img>` without `alt`, click handlers on non-interactive elements and hard-coded `aria-label` text. See
+[Criterion Notes](criterion-notes.md#f004-wcag-21-aa-accessibility).
+
+With `--ui-runtime-url` and `--ui-runtime-login-origin`, and a test account in `FOLIO_UI_USERNAME` and
+`FOLIO_UI_PASSWORD`, F004 also visits the module's pages on a running FOLIO UI and runs axe-core there; the
+agent review, when enabled, then maps each violation to the code. F007 uses the same visit for console errors. Point it at a test or reference
+environment, such as the Eureka snapshot, never a production system: the page text goes to the model
+provider. The probe never builds or serves the evaluated commit, so it measures the version deployed there. See
+[Runtime UI probe](criterion-notes.md#runtime-ui-probe).
+
+## F005 Stripes Version
+
+F005 checks that a UI module uses the Stripes version on the officially supported technologies
+page. It takes S007's own finding for `@folio/stripes` from the same policy, so the two always agree,
+and `--criteria F005` works on its own. A Stripes library that does not depend on `@folio/stripes`,
+such as stripes-components, is left to the reviewer with a checklist item. See
+[Criterion Notes](criterion-notes.md#f005-stripes-version).
+
+## F006 UI Layouts and Patterns
+
+F006 checks that a UI package follows existing FOLIO UI layouts, patterns and norms. That needs a
+reviewer, so it is always `manual` (and not applicable to a package that renders no user interface). It
+lists what a reviewer starts from: the Stripes layout and pattern components used, forms and whether they
+ask before discarding unsaved changes (`navigationCheck`), confirmation modals, raw HTML controls, hex
+colors in CSS, settings pages and external links (never fetched). When agent review is enabled, the agent
+checks the checklist items against a pinned copy of the stripes-components UX guidelines in
+`config/f006-ux-guidelines/`. See [Criterion Notes](criterion-notes.md#f006-ui-layouts-and-patterns).
+
+## F007 Works in the Latest Chrome
+
+F007 checks that a UI package works in the latest Chrome. Only a browser can show that, so it is always
+`manual` (and not applicable to a package that renders no user interface). It lists the browser-specific
+code a reviewer starts from, each with file and line: reads of navigator properties that identify the
+browser (`navigator.userAgent`, `navigator.vendor`, …), vendor-prefixed APIs and APIs Chrome has removed,
+from the pinned and sourced list in `config/f007-browser-apis.json`, a `browserslist` override and the
+polyfills the package ships. With the runtime UI probe (see F004), it also lists the console errors and
+failed requests of the module's pages on a running FOLIO UI and the Chrome version used, and the agent review,
+when enabled, explains each console error from the code and reviews the flagged code; without runtime evidence
+it does not run. See [Criterion Notes](criterion-notes.md#f007-works-in-the-latest-chrome).
+
+## B001 Module Descriptor Template
+
+B001 checks that a backend or edge module commits a module descriptor template that matches the Okapi
+ModuleDescriptor schema, with build placeholders such as `${artifactId}` replaced from `pom.xml` and
+`gradle.properties`. It runs no build; S002 checks the descriptor the build generates. Shared libraries
+are not applicable, and a repository that is neither a module nor a known library is left to the
+reviewer. `--existing-module` marks the evaluation of an existing module rather than a new one; later
+B criteria relax some new-module rules for it. See
+[Criterion Notes](criterion-notes.md#b001-module-descriptor-template).
+
+## B002 Consumed Interfaces Declared
+
+B002 checks that every interface a backend or edge module calls is declared in the module descriptor
+template's `requires` or `optional`. It reads the outbound requests in the committed production source
+(Spring `@HttpExchange` and Feign clients, and paths built in Java or Groovy code from string literals,
+constants and the Okapi URL) and maps them to interfaces through the same offline handler index as F001.
+An undeclared interface is left to the reviewer, not failed, because the call may never run; so are
+requests the tool cannot map, paths not in the index, Kotlin source and FOLIO libraries that send requests
+of their own. Requests to the module's own descriptor paths do not count, and shared libraries are not
+applicable. See
+[Criterion Notes](criterion-notes.md#b002-consumed-interfaces-declared).
+
+## B003 Endpoint Implementations
+
+B003 checks that every endpoint in the module descriptor has an implementation. For RMB and Spring
+modules, whose resource interfaces the build generates from the API spec, an endpoint must be in the
+spec and a committed class must implement the interface named after its RAML resource or OpenAPI tag;
+any module's endpoint is also implemented by a route in the source (Vert.x router, Spring mapping
+annotations, Grails URL mappings). It fails when an RMB or Spring endpoint is in no spec and no route,
+and leaves missing implementing classes, wildcard handlers, library endpoints and unreadable evidence
+to the reviewer. When agent review is enabled, the agent looks for the code serving each endpoint the
+tool could not match, except library endpoints. See [Criterion Notes](criterion-notes.md#b003-endpoint-implementations).
+
+## B004 Environment Variables
+
+B004 checks the environment variables a module uses against the FOLIO
+[Environment Variables policy](https://folio-org.atlassian.net/wiki/x/NYCgTg), pinned in
+`config/b004-env-variables-policy/`. The variables come from both env lists of the module descriptor
+template, `System.getenv` reads and Spring `${NAME}` placeholders. It fails when a variable is not
+documented in `ENV_VARS.md` or a README table with a default, required or optional, and a description,
+when the template has no top-level `env`, when a variable documented as required has a default, when a
+name is not upper case letters, digits and underscores, or when an `AWS_` variable has no `S3_` variable
+alongside. With `--existing-module`, documentation gaps are left to the reviewer; the `S3_` rule still
+applies. A variable that RMB, folio-spring-base or the FOLIO Java base image documents (listed with
+pinned sources in the same directory) needs no documentation of its own when README.md or ENV_VARS.md links to
+that documentation, and goes to the reviewer when it does not. Required variables without fail-fast evidence
+and log statements that may print secrets also go to the reviewer and to the agent review. See [Criterion Notes](criterion-notes.md#b004-environment-variables).
+
+## B005 Interface Naming
+
+B005 checks that each interface the module descriptor provides, other than system interfaces such as
+`_tenant`, has a name of words joined by hyphens and a major.minor version, with build placeholders such
+as `${okapiInterfaceVersion}` resolved from `pom.xml` and `gradle.properties`. It fails on a dot or an
+underscore in a name, or on a version that is not major.minor; with `--existing-module`, these are left
+to the reviewer, because renaming an interface breaks the modules that use it. Uppercase names,
+placeholders the build does not define, and routes in the source that no provided interface covers also
+go to the reviewer. See [Criterion Notes](criterion-notes.md#b005-interface-naming).
+
+## B006 API Documentation
+
+B006 checks that every endpoint in the module descriptor (for an edge module, every router route) is
+documented in an OpenAPI spec in the repository. It follows `$ref`s inside the repository, matches
+methods and paths with any parameter names, and fails on an undocumented endpoint or on RAML in a new
+module; with `--existing-module`, an RMB module may keep RAML. Endpoints served by a library, such as
+custom fields, and specs it cannot fully read leave it to the reviewer. See
+[Criterion Notes](criterion-notes.md#b006-api-documentation).
+
+## B007 Endpoint Permissions
+
+B007 checks the permissions of every endpoint in the module descriptor template, other than those of
+system interfaces. It fails when an endpoint requires a `*.all` permission or a permission no permission
+set in the template defines. Otherwise it is always left to the reviewer, who judges whether each
+permission fits its endpoint; the report lists endpoints without a permission, `*.all` module
+permissions and permission names that depart from the naming guidelines. Agent review runs by default
+for its manual results. See [Criterion Notes](criterion-notes.md#b007-endpoint-permissions).
+
+## B008 Reference Data
+
+B008 checks that a module that stores data ships reference data for its controlled vocabularies:
+collection endpoints named like `*-types`, `*-statuses`, `*-reasons` or `*-categories`, endpoints that
+reference-data folders name, and Grails refdata categories. It passes when each has values loaded at
+tenant initialization, from `ref-data/` or `reference-data/` folders that an RMB `TenantLoading` for the
+`loadReference` key loads, from Liquibase inserts into the vocabulary's table, or from Grails
+`@Defaults`. It is not applicable to libraries and to modules without storage, and leaves everything
+else, including modules with no vocabulary the tool recognises, to the reviewer. Its agent review runs
+only when `--criterion-agent-criteria` lists B008. See
+[Criterion Notes](criterion-notes.md#b008-reference-data).
+
+## B009 API Tests
+
+B009 checks that API tests, where a module has them, use Karate, the framework the officially supported
+technologies page lists (as provisional). It looks for Karate `.feature` files and Postman, Bruno and
+Insomnia collections in the repository, and, with `--allow-remote-lookups`, for `.feature` files and a
+`karate-config.js` in the folio-integration-tests folder named after the module. It fails on Postman,
+Bruno or Insomnia tests, is not applicable when no tests are found anywhere, and is left to the reviewer
+when remote lookups are off and the repository has none. Tests in a folio-integration-tests folder with
+another name, such as `erm/` for mod-agreements, are not seen. See
+[Criterion Notes](criterion-notes.md#b009-api-tests).
+
+## B010 Tenant Data Segregation
+
+B010 applies when the repository stores data: an RMB database schema, PostgresClient or PgUtil use, a
+Liquibase changelog, a datasource, or Grails domain classes with a datasource. It is then always left to
+the reviewer, with the mechanism that keeps each tenant in its own schema (RMB's PostgresClient,
+folio-spring-base, GORM multi-tenancy) and the places where tenant data may be shared: PostgresClient
+without a tenant id, a DataSource or pool the code creates itself, SQL that writes to the `public` schema, a
+schema with a fixed name, and Grails domain classes that do not implement `MultiTenant`. A repository
+without storage, such as an edge module, is not applicable. With agent review enabled, an advisory review
+of the checklist runs by default. See [Criterion Notes](criterion-notes.md#b010-tenant-data-segregation).
+
+## B011 Other Modules' Database Schemas
+
+B011 checks that a module with storage does not read or write other modules' database schemas. It looks
+in its SQL scripts, Liquibase changelogs and Java, Groovy and Kotlin sources, with comments removed, for
+schema names that a tenant placeholder or concatenation qualifies, such as `${myuniversity}_mod_users` or
+`String.format("%s_mod_users", tenant)`, and that name another module. It fails on such a reference in code
+or in an RMB script that runs on every install and upgrade; a reference in a migration (an RMB script with
+`fromModuleVersion`, a Liquibase changeset, a Grails database migration), a schema name built at runtime,
+or a script the tool cannot place goes to the reviewer. Modules without storage and mod-fqm-manager are not
+applicable. See [Criterion Notes](criterion-notes.md#b011-other-modules-database-schemas).
+
+## B012 Dependencies Declared in README
+
+B012 checks that `README.md` names the infrastructure the module uses, as B016 detects it from direct
+dependencies, configuration and storage evidence, using S003's whole-name README matching with
+synonyms such as Postgres and MinIO. It fails when a required infrastructure is not named, and leaves
+optional or configuration-only infrastructure and unreadable files to the reviewer. External services
+and Kafka topics of other modules are checklist items and never fail it. See
+[Criterion Notes](criterion-notes.md#b012-dependencies-declared-in-readme).
+
+## B013 Tenant Selection
+
+B013 checks that a module selects tenant content by the `X-Okapi-Tenant` header. It is always left to
+the reviewer: the report names how the module takes the tenant from the header (folio-spring-base's
+`FolioExecutionContext`, RMB's `TenantTool` and `PgUtil`, Grails' `OkapiTenantResolver` and `Tenants`,
+or the header itself; edge modules map an API key to a tenant), lists possible problems (a tenant named
+in configuration, an environment variable or `@Value`, a static tenant field, a cache without a tenant
+in its key) and the Kafka consumers and scheduled jobs that must set the tenant themselves. Shared
+libraries are not applicable. See [Criterion Notes](criterion-notes.md#b013-tenant-selection).
+
+## B014 Health Check Endpoint
+
+B014 checks that the module serves `GET /admin/health`, without starting the module or calling the
+endpoint: it passes when RMB's `RestVerticle` is the main verticle, when Spring Boot actuator (in a
+Spring Boot or Grails application) serves health at `/admin/health`, or when the source registers a
+`GET /admin/health` route, and the report says the endpoint was not called. Actuator settings that move
+or disable health, in the default configuration or in any profile, and modules with no such mechanism are
+left to the reviewer. With the [backend runtime harness](usage.md#backend-runtime-harness), the module's answer
+decides instead: 200 passes, and any other answer goes to the reviewer; when the module did not reach the
+health check, the committed files decide and the report says why. See
+[Criterion Notes](criterion-notes.md#b014-health-check-endpoint).
+
+## B015 High Availability
+
+B015 checks whether the module can run as several instances behind a load balancer. Only a reviewer can
+decide that, so it is always `manual`, for modules, edge modules and shared libraries alike. It lists the
+sites a reviewer starts from, each with file and line, in `src/main` and `grails-app` source without
+comments: HTTP sessions (Servlet, Spring Session, Vert.x session handlers), local file writes (temporary
+files included), in-memory caches and shared maps (Spring `@Cacheable`, Caffeine, Guava and edge-common
+caches, Vert.x local maps, concurrent map fields), and scheduled work (`@Scheduled`, Vert.x `setPeriodic`,
+executor schedules, timers, Quartz). When agent review is enabled, the agent judges each file with sites,
+and looks for sites the tool missed. See [Criterion Notes](criterion-notes.md#b015-high-availability).
+
+## B016 Supported Infrastructure
+
+B016 checks that the infrastructure a backend module, edge module or library uses is on the
+infrastructure sections of the committed Officially Supported Technologies list
+(`config/officially-supported-technologies.json`, the file S007 reads). It finds infrastructure from
+direct production dependencies in `pom.xml` and `build.gradle` (transitive dependencies are not visible
+without a build), storage evidence (PostgreSQL), configuration keys and environment variable prefixes.
+It fails when the module requires an infrastructure that is not on the list, and leaves optional
+backends that are not on the list, such as edge-common's HashiCorp Vault and AWS SSM secure stores, to
+the reviewer. See [Criterion Notes](criterion-notes.md#b016-supported-infrastructure).
