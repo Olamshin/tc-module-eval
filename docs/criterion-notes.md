@@ -1,6 +1,6 @@
 # Criterion Notes
 
-This file records criterion behavior not covered in the README.
+This file records criterion behavior not covered in the [Criteria Overview](criteria.md).
 
 ## Rules for Every Criterion
 

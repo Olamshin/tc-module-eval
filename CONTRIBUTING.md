@@ -4,7 +4,7 @@ For basic usage, see [README.md](README.md).
 
 ## Prerequisites
 
-- Node.js 18.x or later
+- Node.js 24 or later
 - Yarn 1.22.x or later
 - Maven 3.x (for evaluating Java modules)
 
