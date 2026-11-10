@@ -241,7 +241,7 @@ describe('S006 agent review adapter', () => {
     expect(review.available).toBe(disposition === 'unresolved');
   });
 
-  it.each(['unresolved-gap', 'resolved-gap', 'invented-gap', 'source-finding', 'action'])('limits scanner-context citations to unresolved trusted gaps: %s', async mode => {
+  it.each(['unresolved-gap', 'unresolved-limitation-gap', 'unresolved-concern-gap', 'resolved-gap', 'invented-gap', 'source-finding', 'action'])('limits scanner-context citations to unresolved trusted gaps: %s', async mode => {
     writeFile('README.md', 'Source scope');
     commit();
     const analysis = await analyzeRepo();
@@ -249,7 +249,9 @@ describe('S006 agent review adapter', () => {
     analysis.coverage.warnings = [{ kind: 'candidate-limit', message: 'Scan cap reached.', materialToCoverage: true }];
     const context = ['.criterion-agent/S006/finding-summary.json'];
     const gap = { technologyId: mode === 'invented-gap' ? 'gap:invented' : mode === 'source-finding' ? 'discovered:source' : 'gap:candidate-limit',
-      type: mode === 'resolved-gap' ? 'aligned_fact' as const : 'evidence_gap' as const,
+      type: mode === 'resolved-gap' ? 'aligned_fact' as const
+        : mode === 'unresolved-limitation-gap' ? 'analyzer_limitation' as const
+        : mode === 'unresolved-concern-gap' ? 'substantive_concern' as const : 'evidence_gap' as const,
       summary: 'Scanner coverage is incomplete.', coverageDisposition: mode === 'resolved-gap' ? 'immaterial' as const : 'unresolved' as const,
       evidenceReferences: context };
     const review = await reviewS006WithAgent(repoPath, analysis, fakeConfig({
@@ -257,8 +259,9 @@ describe('S006 agent review adapter', () => {
         { technologyId: 'scope', type: 'evidence_gap', summary: 'Partial scope.', coverageDisposition: 'unresolved', evidenceReferences: ['README.md'] }, gap
       ], reviewerActions: [{ action: 'Inspect additional source to address the scan cap.', evidenceReferences: mode === 'action' ? context : ['README.md'] }]
     }));
-    expect(review.available).toBe(mode === 'unresolved-gap');
-    if (mode !== 'unresolved-gap') expect(review.errors.join(' ')).toContain('requires repository evidence');
+    const accepted = ['unresolved-gap', 'unresolved-limitation-gap'].includes(mode);
+    expect(review.available).toBe(accepted);
+    if (!accepted) expect(review.errors.join(' ')).toContain('requires repository evidence');
   });
 
   it.each([

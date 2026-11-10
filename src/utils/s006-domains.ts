@@ -4,6 +4,7 @@ import { buildS006Warning, S006ScannedCandidateTextFile } from './s006-scanner';
 const MAX_DOMAINS = 1000;
 const MAX_DOMAIN_FILES = 4000;
 const MAX_URL_LENGTH = 8192;
+const MAX_REJECTED_CANDIDATE_FILES = 20;
 
 export function collectS006DomainReview(files: ReadonlyArray<S006ScannedCandidateTextFile>): {
   domainReview?: S006DomainReview;
@@ -13,13 +14,15 @@ export function collectS006DomainReview(files: ReadonlyArray<S006ScannedCandidat
   const review: S006DomainReview = { emailCount: 0, urlCount: 0, omittedOccurrences: 0, domains: [] };
   let retainedFiles = 0;
   let omittedFiles = 0;
-  let rejectedCandidates = 0;
+  let cutShortCandidates = 0;
+  const rejectedByFile = new Map<string, number>();
 
   for (const file of files) {
+    const reject = () => rejectedByFile.set(file.path, (rejectedByFile.get(file.path) ?? 0) + 1);
     const fileCounts = new Map<string, { path: string; emailCount: number; urlCount: number }>();
     for (const { token, isUrl, end } of domainCandidates(file.text)) {
       if (file.truncated && end === file.text.length) {
-        if (isUrl || token.includes('@')) rejectedCandidates++;
+        if (isUrl || token.includes('@')) cutShortCandidates++;
         continue;
       }
       let domain: string | undefined;
@@ -33,10 +36,10 @@ export function collectS006DomainReview(files: ReadonlyArray<S006ScannedCandidat
             domain = undefined;
           }
         }
-        if (!domain) rejectedCandidates++;
+        if (!domain) reject();
       } else {
         if (file.text.startsWith('://', end)) {
-          rejectedCandidates++;
+          reject();
           continue;
         }
         const at = token.indexOf('@');
@@ -47,7 +50,7 @@ export function collectS006DomainReview(files: ReadonlyArray<S006ScannedCandidat
           isDomain(host)) {
           domain = host;
         } else {
-          rejectedCandidates++;
+          reject();
         }
       }
       if (!domain) continue;
@@ -83,12 +86,22 @@ export function collectS006DomainReview(files: ReadonlyArray<S006ScannedCandidat
   }
 
   review.domains = [...domains.values()].sort((left, right) => left.domain.localeCompare(right.domain));
+  const listedFiles = [...rejectedByFile].slice(0, MAX_REJECTED_CANDIDATE_FILES);
+  const unlistedRejected = [...rejectedByFile.values()].slice(MAX_REJECTED_CANDIDATE_FILES).reduce((sum, count) => sum + count, 0);
   const warnings: S006ScanWarning[] = [];
-  if (review.omittedOccurrences || omittedFiles || rejectedCandidates) {
+  if (review.omittedOccurrences || omittedFiles || cutShortCandidates || unlistedRejected) {
     warnings.push(buildS006Warning(
       'domain-review-limit',
-      `Email and URL domain review retains at most ${MAX_DOMAINS} domains and ${MAX_DOMAIN_FILES} domain/file entries: ${review.omittedOccurrences} occurrences have unlisted domains, ${omittedFiles} file entries are unlisted, and ${rejectedCandidates} candidates could not be read (invalid, cut short, or a URL longer than ${MAX_URL_LENGTH} characters). Counts cover only the text the built-in scan read.`,
+      `Email and URL domain review retains at most ${MAX_DOMAINS} domains and ${MAX_DOMAIN_FILES} domain/file entries: ${review.omittedOccurrences} occurrences have unlisted domains, ${omittedFiles} file entries are unlisted, and ${cutShortCandidates + unlistedRejected} candidates could not be read (cut short where a file was only partly read, or in files beyond the ${MAX_REJECTED_CANDIDATE_FILES} listed separately). Counts cover only the text the built-in scan read.`,
       true
+    ));
+  }
+  for (const [filePath, count] of listedFiles) {
+    warnings.push(buildS006Warning(
+      'domain-review-limit',
+      `${count} email or URL ${count === 1 ? 'candidate' : 'candidates'} in ${filePath} could not be read by the domain review (invalid, or a URL longer than ${MAX_URL_LENGTH} characters).`,
+      true,
+      filePath
     ));
   }
   return { ...(review.emailCount || review.urlCount ? { domainReview: review } : {}), warnings };

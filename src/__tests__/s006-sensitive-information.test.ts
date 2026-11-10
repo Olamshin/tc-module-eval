@@ -155,7 +155,7 @@ describe('S006 email and URL domain review', () => {
     expect(result.domainReview!.domains).toHaveLength(1000);
     expect(result.warnings).toEqual([{
       kind: 'domain-review-limit', path: undefined, materialToCoverage: true,
-      message: 'Email and URL domain review retains at most 1000 domains and 4000 domain/file entries: 2 occurrences have unlisted domains, 0 file entries are unlisted, and 0 candidates could not be read (invalid, cut short, or a URL longer than 8192 characters). Counts cover only the text the built-in scan read.'
+      message: 'Email and URL domain review retains at most 1000 domains and 4000 domain/file entries: 2 occurrences have unlisted domains, 0 file entries are unlisted, and 0 candidates could not be read (cut short where a file was only partly read, or in files beyond the 20 listed separately). Counts cover only the text the built-in scan read.'
     }]);
     expect(result.coverage.complete).toBe(false);
     expect(result.classification.status).toBe(EvaluationStatus.MANUAL);
@@ -171,7 +171,7 @@ describe('S006 email and URL domain review', () => {
     expect(result.domainReview!.domains.map(group => ({ emails: group.emailCount, files: group.fileCount, retained: group.files.length })))
       .toEqual(Array.from({ length: 5 }, () => ({ emails: 801, files: 801, retained: 800 })));
     expect(result.warnings.map(warning => warning.message)).toEqual([
-      'Email and URL domain review retains at most 1000 domains and 4000 domain/file entries: 0 occurrences have unlisted domains, 5 file entries are unlisted, and 0 candidates could not be read (invalid, cut short, or a URL longer than 8192 characters). Counts cover only the text the built-in scan read.'
+      'Email and URL domain review retains at most 1000 domains and 4000 domain/file entries: 0 occurrences have unlisted domains, 5 file entries are unlisted, and 0 candidates could not be read (cut short where a file was only partly read, or in files beyond the 20 listed separately). Counts cover only the text the built-in scan read.'
     ]);
     expect(result.classification.status).toBe(EvaluationStatus.MANUAL);
   });
@@ -181,10 +181,24 @@ describe('S006 email and URL domain review', () => {
     writeRepoFile(repoPath, 'src/cut.txt', `${' '.repeat(MAX_S006_SCAN_BYTES_PER_FILE - 20)}cut@partial.invalid.more-text`);
     const result = await analyzeRepo(repoPath);
     expect(result.domainReview).toBeUndefined();
-    expect(result.warnings.filter(warning => warning.kind === 'domain-review-limit').map(warning => warning.message)).toEqual([
-      'Email and URL domain review retains at most 1000 domains and 4000 domain/file entries: 0 occurrences have unlisted domains, 0 file entries are unlisted, and 4 candidates could not be read (invalid, cut short, or a URL longer than 8192 characters). Counts cover only the text the built-in scan read.'
-    ]);
+    expect(result.warnings.filter(warning => warning.kind === 'domain-review-limit').map(({ message, path }) => ({ message, path }))).toEqual([{
+      path: undefined,
+      message: 'Email and URL domain review retains at most 1000 domains and 4000 domain/file entries: 0 occurrences have unlisted domains, 0 file entries are unlisted, and 1 candidates could not be read (cut short where a file was only partly read, or in files beyond the 20 listed separately). Counts cover only the text the built-in scan read.'
+    }, {
+      path: 'src/invalid.txt',
+      message: '3 email or URL candidates in src/invalid.txt could not be read by the domain review (invalid, or a URL longer than 8192 characters).'
+    }]);
     expect(result.classification.status).toBe(EvaluationStatus.MANUAL);
+  });
+
+  it('names at most 20 files with unreadable candidates and counts the rest', async () => {
+    for (let index = 0; index < 21; index++) {
+      writeRepoFile(repoPath, `src/${String(index).padStart(2, '0')}.txt`, index === 20 ? 'https://a:x/ https://b:y/' : 'https://a:x/');
+    }
+    const result = await analyzeRepo(repoPath);
+    const warnings = result.warnings.filter(warning => warning.kind === 'domain-review-limit');
+    expect(warnings.map(warning => warning.path)).toEqual([undefined, ...Array.from({ length: 20 }, (_, index) => `src/${String(index).padStart(2, '0')}.txt`)]);
+    expect(warnings[0].message).toContain('and 2 candidates could not be read');
   });
 
   it.each(['long non-matches', 'dense repeated domains'])('collects %s in linear time', async mode => {
