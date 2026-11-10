@@ -297,8 +297,9 @@ action citations, an unknown path in a bound is discarded, and a bound left with
 no repository citation rejects the response. These checks enforce
 structural consistency, not the truth of model-authored explanations.
 
-The narrow exception is an unresolved S006 coverage-gap assessment whose ID was
-supplied by the evaluator: it may cite the scanner's generated coverage diagnostics.
+The narrow exception is an unresolved S006 coverage-gap assessment of type `evidence_gap`
+or `analyzer_limitation` whose ID was supplied by the evaluator: it may cite the
+scanner's generated coverage diagnostics.
 Those diagnostics establish a scan limitation, not repository contents. Resolved
 gaps, source findings, and reviewer actions still require source citations, and
 overall advice needs one in its own sources or elsewhere in the review. Invalid-record diagnostics identify record indexes and fixed failure

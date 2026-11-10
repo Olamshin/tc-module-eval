@@ -51,7 +51,8 @@ function reviewObligations(analysis: S006SensitiveInformationAnalysisResult): Ar
   const gaps = new Map<string, { id: string; description: string; path?: string }>();
   for (const warning of analysis.coverage.warnings.filter(item => item.materialToCoverage)) {
     const id = `gap:${warning.path ?? warning.kind}`;
-    gaps.set(id, { id, description: warning.message, path: warning.path });
+    const existing = gaps.get(id);
+    gaps.set(id, { id, description: existing ? `${existing.description} ${warning.message}` : warning.message, path: warning.path });
   }
   for (const skipped of analysis.coverage.skippedFiles.filter(item => item.materialToCoverage)) {
     const id = `gap:${skipped.path}`;
@@ -78,7 +79,7 @@ export async function buildS006AgentReviewRequest(
     generatedEvidencePaths: [{
       path: S006_FINDING_SUMMARY_PATH,
       technologyIds: obligations.filter(item => item.id.startsWith('gap:')).map(item => item.id),
-      accepts: assessment => assessment.coverageDisposition === 'unresolved' && assessment.type === 'evidence_gap'
+      accepts: assessment => assessment.coverageDisposition === 'unresolved' && ['evidence_gap', 'analyzer_limitation'].includes(assessment.type)
     }],
     instructions: [
       'Evaluate whether committed sensitive or environment-specific information needs reviewer attention. Investigate surrounding source, configuration, CI, documentation, fixtures, and usage paths, including files absent from the scanner findings. Distinguish production usage from examples, synthetic fixtures, and local defaults using cited context.',
@@ -86,7 +87,7 @@ export async function buildS006AgentReviewRequest(
       'Return assessments as an array with exactly one object for each reviewObligations ID, using the ID as technologyId. Each assessment object has technologyId, type (aligned_fact, substantive_concern, analyzer_limitation, evidence_gap, policy_question), summary, evidenceReferences (an array of repository paths), and coverageDisposition (investigated, immaterial, unresolved). Use exactly these field names; see response-shape.json. For investigated path obligations, cite the original path as well as relevant usage. For immaterial, explain from cited context why the omission does not affect this scoped decision; do not imply direct inspection. Excluded source is not inspected source.',
       'For additional findings discovered outside the scanner inventory, add assessments using discovered:<normalized-id> with the same fields. Do not omit new concerns merely because there is no supplied obligation ID.',
       'sourceAvailable=false means the source cannot be inspected in this snapshot, NOT that it is uncommitted or absent from the repository. A scanner finding with unavailable source must remain unresolved (evidence_gap); documentation can supply context, but cannot establish the actual excluded contents. Cite related available usage and request inspection of the excluded file, without reproducing credential values or assignments.',
-      `Narrow citation exception: an unresolved evidence_gap assessment for a supplied gap: ID may cite ${S006_FINDING_SUMMARY_PATH}, because scanner diagnostics establish scanner limitations. This does not support claims about repository contents, resolved gaps, finding: IDs, or reviewer actions; those still need source citations.`,
+      `Narrow citation exception: an unresolved evidence_gap or analyzer_limitation assessment for a supplied gap: ID may cite ${S006_FINDING_SUMMARY_PATH}, because scanner diagnostics establish scanner limitations. This does not support claims about repository contents, resolved gaps, finding: IDs, or reviewer actions; those still need source citations.`,
       'Distinguish the built-in candidate scan from Gitleaks, source available to browse, and source actually investigated. Availability alone does not resolve a scan cap. Explain additional investigation and any remaining gap. Confidence applies to this scoped assessment, not assurance that no secrets exist anywhere.',
       'Use likely_sufficient only when every material obligation is resolved and no finding needs further evidence or policy judgment. Unresolved obligations require needs_reviewer_judgment and cited reviewerActions naming the missing fact. Coverage gaps alone never justify likely_insufficient. Keep summary and rationale consistent with these dispositions.',
       'Do not claim that any credential, token, key, password, private URL, credential URL, endpoint, or secret is live, valid, exploitable, revoked, or safe. Never test credentials or contact endpoints. Do not reproduce secret values in your response; cite paths and describe their role instead.',
@@ -116,7 +117,8 @@ export async function buildS006AgentReviewRequest(
           assessments: [
             { technologyId: 'scope', type: 'analyzer_limitation', summary: 'Describe what was investigated beyond the findings and what remains unchecked.', evidenceReferences: ['actual/source/path'], coverageDisposition: 'investigated' },
             { technologyId: 'finding:0', type: 'aligned_fact', summary: 'State the role of the flagged value without repeating it.', evidenceReferences: ['flagged/source/path', 'related/usage/path'], coverageDisposition: 'investigated' },
-            { technologyId: 'gap:example/path', type: 'analyzer_limitation', summary: 'Explain from cited context why this gap does not affect the decision. Immaterial is a coverageDisposition, never a type.', evidenceReferences: ['related/usage/path'], coverageDisposition: 'immaterial' }
+            { technologyId: 'gap:example/path', type: 'analyzer_limitation', summary: 'Explain from cited context why this gap does not affect the decision. Immaterial is a coverageDisposition, never a type.', evidenceReferences: ['related/usage/path'], coverageDisposition: 'immaterial' },
+            { technologyId: 'gap:example-limit', type: 'analyzer_limitation', summary: 'Name the scanner limit and what it left unchecked. A gap without a path that no source resolves stays unresolved.', evidenceReferences: [S006_FINDING_SUMMARY_PATH], coverageDisposition: 'unresolved' }
           ],
           reviewerActions: [{ action: 'Name the fact to verify and the decision it resolves.', evidenceReferences: ['actual/source/path'] }]
         }
