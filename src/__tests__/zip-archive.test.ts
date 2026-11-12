@@ -116,6 +116,20 @@ describe('readZipTextFiles', () => {
     });
   });
 
+  it('applies the limits to decoded text, which invalid UTF-8 makes longer than the entry', () => {
+    // Each 0xff byte decodes to U+FFFD, three bytes of UTF-8.
+    const invalid = (length: number) => Buffer.alloc(length, 0xff);
+    const archive = zip([{ name: 'a.txt', content: invalid(30) }, { name: 'b.txt', content: invalid(20) }]);
+
+    const result = readZipTextFiles(archive, { maxFiles: 10, maxFileBytes: 64, maxTotalBytes: 1024 });
+
+    expect(result.files.map(file => [file.path, Buffer.byteLength(file.content)])).toEqual([['b.txt', 60]]);
+    expect(result.omitted).toEqual([{ path: 'a.txt', reason: 'larger than the file limit' }]);
+    const total = readZipTextFiles(zip([{ name: 'a.txt', content: invalid(20) }, { name: 'b.txt', content: invalid(20) }]), { maxFiles: 10, maxFileBytes: 64, maxTotalBytes: 100 });
+    expect(total.files.map(file => file.path)).toEqual(['a.txt']);
+    expect(total.omitted).toEqual([{ path: 'b.txt', reason: 'beyond the archive limits' }]);
+  });
+
   it('refuses an entry that inflates past its declared size instead of inflating it', () => {
     const archive = zip([{ name: 'bomb.java', content: 'x'.repeat(1_000_000), declaredSize: 10 }]);
 

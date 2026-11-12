@@ -57,6 +57,7 @@ import { hasS011AgentReviewMaterial, reviewS011WithAgent } from '../../utils/s01
 import { analyzeS014, renderS014HumanDetails } from '../../utils/s014-evaluator';
 import { hasS010AgentReviewMaterial, reviewS010WithAgent } from '../../utils/s010-agent-review';
 import { collectS010LibrarySources } from '../../utils/s010-library-sources';
+import { readRepositorySnapshot } from '../../utils/agent-review-repository';
 import { errorMessage } from '../../utils/type-guards';
 
 /**
@@ -307,8 +308,8 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
       hasReviewMaterial: hasS010AgentReviewMaterial(analysis),
       evaluationRun: run,
       review: async (config, commandRunner) => {
-        const dependencies = await run.getOrCreateArtifact('s009DependencyEvidence', () => collectS009DependencyEvidence(repoPath));
-        const librarySources = await collectS010LibrarySources(dependencies, run.remoteLookups);
+        const snapshot = await (config.readRepositorySnapshot ?? (() => readRepositorySnapshot(repoPath)))();
+        const librarySources = await collectS010LibrarySources(snapshot, run.remoteLookups);
         if (librarySources.sources.libraries.length) analysis.agentReviewLibrarySources = librarySources.sources;
         return reviewS010WithAgent(repoPath, analysis, config, commandRunner, librarySources);
       }

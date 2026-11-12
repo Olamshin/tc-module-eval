@@ -23,7 +23,7 @@ import { analyzeS011 } from '../utils/s011-evaluator';
 import { lookUpIntegrationTests } from '../utils/b009-api-tests';
 import { trimSonarCloudResponses } from './sonarcloud-fixture-trim';
 import { collectPlatformSnapshot, DEFAULT_PLATFORM_REF } from '../utils/s014-application-assignment';
-import { collectS009DependencyEvidence } from '../utils/s009-dependency-evidence';
+import { readRepositorySnapshot } from '../utils/agent-review-repository';
 import { collectS010LibrarySources } from '../utils/s010-library-sources';
 import { errorMessage } from '../utils/type-guards';
 
@@ -113,7 +113,7 @@ async function captureLibrarySources(checkouts: string[], output: string): Promi
   const names: string[] = [];
   for (const checkout of checkouts) {
     const name = path.basename(path.resolve(checkout));
-    const { sources } = await collectS010LibrarySources(await collectS009DependencyEvidence(checkout), transport);
+    const { sources } = await collectS010LibrarySources(await readRepositorySnapshot(checkout), transport);
     console.log(`${name}: ${sources.libraries.map(library => `${library.coordinate} ${library.version ?? '?'} ${library.root ? 'read' : library.problem}`).join('; ')}`);
     names.push(name);
   }

@@ -133,9 +133,10 @@ Kafka, or HTTP clients without any reference in the module's code; folio-spring-
 for example, sets PostgreSQL's `statement_timeout` from `DB_QUERYTIMEOUT`. The agent is
 told never to call a setting unused because repository code does not mention it. With
 `--allow-remote-lookups`, it can also read those libraries: for each production `org.folio`
-dependency in the module's build files (S009's dependency evidence, so modules of the
-same repository are left out), the evaluator downloads the released sources jar of the
-version the build files set from `repository.folio.org/repository/maven-releases/` and
+dependency in the committed build files the agent reviews (S009's dependency evidence
+for that revision, so modules of the same repository are left out, and uncommitted
+changes are ignored), the evaluator downloads the released sources jar of the version
+the build files set from `repository.folio.org/repository/maven-releases/` and
 puts its text files under `folio-library-sources/<groupId>/<artifactId>/<version>/` in the
 review workspace, with `.criterion-agent/S010/library-sources.json` listing each library.
 A library is skipped, and the report says why, when the repository's build files do not
@@ -143,7 +144,7 @@ set its version (a parent POM or BOM outside the repository may), the version is
 snapshot, a variable or not a single release, it has no sources jar, or the review has
 read 12 libraries already. The downloads have their own budget of 24 requests, 12 MiB and
 60 s, so they never use up the remote lookups of other criteria. Unpacking keeps text files
-of at most 1 MiB under safe relative paths, and skips links, binaries, repeated or
+of at most 1 MiB, measured after decoding, under safe relative paths, and skips links, binaries, repeated or
 conflicting paths, and anything past 2,000 files per library or 32 MiB in all; a library
 that lost text files that way is marked incomplete for the agent and in the report. The agent may cite library files only alongside a repository file. A
 repository with its own `folio-library-sources/` folder gets no review rather than a mix

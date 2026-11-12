@@ -1,6 +1,11 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { RemoteLookups, S009DependencyEvidence, S010LibrarySource, S010LibrarySources } from '../types';
 import { MAX_FILE_BYTES } from './agent-review-repository';
+import type { CommittedSourceSnapshot } from './committed-source';
 import type { CriterionAgentReviewFile } from './criterion-agent-review';
+import { collectS009DependencyEvidence } from './s009-dependency-evidence';
 import { errorMessage } from './type-guards';
 import { readZipTextFiles, ZipReadResult } from './zip-archive';
 
@@ -15,6 +20,7 @@ const DOWNLOAD_LIMITS = { maxRequests: 2 * MAX_LIBRARIES, maxTotalBytes: 12 * Mi
 const MAX_UNPACKED_BYTES = 32 * MiB;
 const MAX_FILES_PER_LIBRARY = 2_000;
 const RELEASE_VERSION = /^[0-9][0-9A-Za-z.-]*$/;
+const BUILD_FILE = /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?)$/;
 const COORDINATE_PART = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 
 export interface S010LibrarySourceFiles {
@@ -23,14 +29,16 @@ export interface S010LibrarySourceFiles {
 }
 
 /**
- * The released source of each FOLIO library the module declares as a production dependency, at the version its
- * build files set (S009's dependency evidence), read from FOLIO's Maven releases repository. A library whose
- * version is not a release version set in the repository is skipped rather than guessed.
+ * The released source of each FOLIO library the module declares as a production dependency, at the version the
+ * build files of the committed snapshot the agent reviews set (S009's dependency evidence), read from FOLIO's Maven
+ * releases repository. A library whose version is not a release version set in the repository is skipped rather
+ * than guessed.
  */
 export async function collectS010LibrarySources(
-  evidence: S009DependencyEvidence,
+  snapshot: CommittedSourceSnapshot,
   lookups: RemoteLookups | undefined
 ): Promise<S010LibrarySourceFiles> {
+  const evidence = await committedDependencies(snapshot);
   const declared = new Map<string, S010LibrarySource>();
   for (const observation of evidence.observations) {
     if (observation.ecosystem !== 'maven' || observation.locality) continue;
@@ -85,22 +93,30 @@ export async function collectS010LibrarySources(
       continue;
     }
     library.root = `${S010_LIBRARY_SOURCES_ROOT}/${groupId}/${artifactId}/${version}`;
-    library.fileCount = 0;
-    let omitted = archive.omitted.filter(entry => entry.reason !== 'binary').length;
+    library.fileCount = archive.files.length;
+    const omitted = archive.omitted.filter(entry => entry.reason !== 'binary').length;
+    if (omitted) library.omittedFileCount = omitted;
     for (const file of archive.files) {
-      // Invalid UTF-8 decodes to longer replacement characters.
-      const bytes = Buffer.byteLength(file.content);
-      if (bytes > MAX_FILE_BYTES) {
-        omitted += 1;
-        continue;
-      }
-      unpacked += bytes;
-      library.fileCount += 1;
+      unpacked += Buffer.byteLength(file.content);
       files.push({ repoRelativePath: `${library.root}/${file.path}`, content: file.content });
     }
-    if (omitted) library.omittedFileCount = omitted;
   }
   return { sources: { libraries }, files };
+}
+
+// The working tree can differ from the committed revision the agent reads, so the build files are taken from the snapshot.
+async function committedDependencies(snapshot: CommittedSourceSnapshot): Promise<S009DependencyEvidence> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 's010-build-files-'));
+  try {
+    for (const file of snapshot.files.filter(candidate => BUILD_FILE.test(candidate.path))) {
+      const target = path.join(root, file.path);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, file.content);
+    }
+    return await collectS009DependencyEvidence(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function versionProblem(version: string | undefined): string | undefined {

@@ -86,8 +86,13 @@ export function readZipTextFiles(archive: Buffer, limits: ZipReadLimits): ZipRea
     }
     if (content.length !== size) throw new Error(`The archive entry ${name} does not match its declared size.`);
     if (content.subarray(0, BINARY_PROBE_BYTES).includes(0)) { omit('binary'); continue; }
-    totalBytes += size;
-    files.push({ path: name, content: content.toString('utf8') });
+    // Invalid UTF-8 decodes to longer replacement characters, so the limits apply to the text returned.
+    const text = content.toString('utf8');
+    const bytes = Buffer.byteLength(text);
+    if (bytes > limits.maxFileBytes) { omit('larger than the file limit'); continue; }
+    if (totalBytes + bytes > limits.maxTotalBytes) { omit('beyond the archive limits'); continue; }
+    totalBytes += bytes;
+    files.push({ path: name, content: text });
   }
   return { files, omitted };
 }

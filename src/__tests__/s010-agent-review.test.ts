@@ -10,7 +10,7 @@ import {
 } from '../utils/s010-agent-review';
 import * as committedSource from '../utils/committed-source';
 import { prepareCriterionAgentReviewEvidence, prepareCriterionReviewWorkspace } from '../utils/criterion-agent-review';
-import { collectS009DependencyEvidence } from '../utils/s009-dependency-evidence';
+import { readRepositorySnapshot } from '../utils/agent-review-repository';
 import { collectS010LibrarySources } from '../utils/s010-library-sources';
 import { renderS010HumanDetails } from '../utils/s010-report-details';
 import { sourceLine } from '../utils/remote-evidence';
@@ -488,7 +488,7 @@ describe('S010 advisory agent review', () => {
 
     async function librarySources(lookups = true) {
       const replay = replayTransport(loadRemoteFixture('folio-library-sources'));
-      const sources = await collectS010LibrarySources(await collectS009DependencyEvidence(repo), lookups ? replay.transport : undefined);
+      const sources = await collectS010LibrarySources(await readRepositorySnapshot(repo), lookups ? replay.transport : undefined);
       expect(replay.unrecorded).toEqual([]);
       // Downloads use their own budget: the evaluation's transport, shared with other criteria, records none.
       expect(replay.transport.records).toEqual([]);
@@ -532,6 +532,17 @@ describe('S010 advisory agent review', () => {
         'Library source downloads:',
         sourceLine(base),
         sourceLine(cql)
+      ]);
+    });
+
+    it('takes library versions from the committed build files the agent reviews, not the working tree', async () => {
+      await fs.outputFile(path.join(repo, 'pom.xml'), POM.replace('<folio-spring-base.version>10.0.1<', '<folio-spring-base.version>10.0.0<'));
+
+      const { requested } = await librarySources();
+
+      expect(requested).toEqual([
+        `${BASE}/folio-spring-base/10.0.1/folio-spring-base-10.0.1-sources.jar`,
+        `${BASE}/folio-spring-cql/10.0.1/folio-spring-cql-10.0.1-sources.jar`
       ]);
     });
 
@@ -583,7 +594,7 @@ describe('S010 advisory agent review', () => {
           return { ok: false, reason: 'http-status', status: 404, record: { url, fetchedAt: '2026-11-12T00:00:00Z', status: 404, error: 'HTTP 404.' } };
         }
       };
-      const { sources } = await collectS010LibrarySources(await collectS009DependencyEvidence(repo), lookups);
+      const { sources } = await collectS010LibrarySources(await readRepositorySnapshot(repo), lookups);
       expect(requested).toEqual(names.slice(0, 12).map(name => `${BASE}/${name}/1.0.0/${name}-1.0.0-sources.jar`));
       expect(sources.libraries.slice(-2).map(({ coordinate, problem }) => ({ coordinate, problem }))).toEqual([
         { coordinate: 'org.folio:lib-12', problem: 'the review reads at most 12 libraries' },
