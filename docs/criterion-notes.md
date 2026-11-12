@@ -188,7 +188,9 @@ evidence but are not mandatory. For deterministic manual and failed results, opt
 review browses the eligible committed source tree and follows cross-file references,
 using deterministic findings as starting points rather than a file-selection boundary.
 Workspace safety ceilings and the review timeout still apply. Its cited advice
-helps human review but never changes criterion status.
+helps human review but never changes criterion status. With `--allow-remote-lookups`,
+the review also gets the released source of the FOLIO libraries the module declares
+(see [Agent review](agent-review.md#s010-third-party-system-resilience-review)).
 
 For Java databases, the evaluator groups JDBC, JPA, R2DBC, datasource, Liquibase, and
 Flyway usage into dependency-level evidence rather than one diagnostic per source file.
@@ -337,8 +339,8 @@ An application whose FAR descriptor is missing, not exactly one record, for anot
 
 `--allow-remote-lookups` turns on the evaluator's network reads of remote evidence during evaluation (catalog refresh commands are separate; the only other network access is the opt-in [runtime UI probe](#runtime-ui-probe) of F004 and F007, which drives a browser rather than reading JSON, and the image pulls and build downloads of the opt-in [backend runtime harness](#backend-runtime-harness)). Every read goes through `src/utils/remote-evidence.ts`:
 
-- HTTPS `GET` only, to `far.ci.folio.org/applications`, `sonarcloud.io/api/`, `raw.githubusercontent.com` or `api.github.com` paths of `folio-org/platform-lsp`, and two `api.github.com` paths of `folio-org/folio-integration-tests`: `/contents/` (the top-level listing) and `/git/trees/<40-hex tree id>` (B009). Every redirect is checked against the same list, and at most 3 are followed.
-- Per request: 15 s and 4 MiB, and the response must be JSON. One retry on HTTP 429 or 5xx, waiting for `Retry-After` only up to 10 s.
+- HTTPS `GET` only, to `far.ci.folio.org/applications`, `sonarcloud.io/api/`, `raw.githubusercontent.com` or `api.github.com` paths of `folio-org/platform-lsp`, two `api.github.com` paths of `folio-org/folio-integration-tests`: `/contents/` (the top-level listing) and `/git/trees/<40-hex tree id>` (B009), and released `org.folio` sources jars in `repository.folio.org/repository/maven-releases/` (S010's agent review). The rest of `repository.folio.org` is not allowed: it also proxies public npm, Docker Hub and Helm repositories and serves snapshots. Every redirect is checked against the same list, and at most 3 are followed.
+- Per request: 15 s and 4 MiB, and the response must be JSON, except the sources jars, which have a separate budget (see [Agent review](agent-review.md#s010-third-party-system-resilience-review)). One retry on HTTP 429 or 5xx, waiting for `Retry-After` only up to 10 s.
 - Per evaluation: at most 150 requests, 32 MiB and 120 s with a request in flight (time between lookups, such as an agent review, does not count), with at most 4 requests in flight. A read that hits a limit fails; it never returns partial or empty data.
 - Optional tokens: `SONAR_TOKEN` is sent only to `sonarcloud.io` and `GITHUB_TOKEN` only to `api.github.com`, so a redirect to another host drops it. A token that is not a valid header value is not sent. Tokens are never recorded, and network error text, which can quote request headers, is not either; a token value that reaches any output is masked as `[REDACTED_SONAR_TOKEN]` or `[REDACTED_GITHUB_TOKEN]`. Without a token, GitHub allows 60 anonymous API requests an hour; S014 uses one per evaluation and B009 at most two. SonarCloud answers S011 and S013 anonymously (they share one set of about 14 reads); a `SONAR_TOKEN` matters only for reading the project's own settings (see S011).
 - Every read is recorded in `criterionDetails.remoteEvidence` with its URL, time, HTTP status and the SHA-256 of the response, plus each redirect hop and retry with its status, and the report lists them under "Sources". A response that completes after its time limit is rejected even if it arrived in full.

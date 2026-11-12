@@ -1,4 +1,11 @@
-import { RemoteEvidenceAttempt, RemoteEvidenceRecord, RemoteFailureReason, RemoteJsonResult, RemoteLookups } from '../types/remote-evidence';
+import {
+  RemoteBytesResult,
+  RemoteEvidenceAttempt,
+  RemoteEvidenceRecord,
+  RemoteFailureReason,
+  RemoteJsonResult,
+  RemoteLookups
+} from '../types/remote-evidence';
 import { reportText } from './report-text';
 import { sha256Digest } from './repo-files';
 
@@ -48,7 +55,10 @@ const ALLOWED_PATHS: Readonly<Record<string, RegExp>> = {
   'sonarcloud.io': /^\/api\//,
   'far.ci.folio.org': /^\/applications$/,
   'raw.githubusercontent.com': /^\/folio-org\/platform-lsp\//,
-  'api.github.com': /^\/repos\/folio-org\/(?:platform-lsp(?:\/|$)|folio-integration-tests\/(?:contents\/|git\/trees\/[0-9a-f]{40})$)/
+  'api.github.com': /^\/repos\/folio-org\/(?:platform-lsp(?:\/|$)|folio-integration-tests\/(?:contents\/|git\/trees\/[0-9a-f]{40})$)/,
+  // Released sources jars of FOLIO libraries only. The host also proxies public npm, Docker Hub and Helm
+  // repositories and serves snapshots, which are neither FOLIO's code nor immutable.
+  'repository.folio.org': /^\/repository\/maven-releases\/org\/folio\/(?:[a-z0-9-]+\/)*?([A-Za-z0-9_.-]+)\/([0-9][0-9A-Za-z.-]*)\/\1-\2-sources\.jar$/
 };
 const DEFAULT_RETRY_WAIT_MS = 1_000;
 const TOKEN_PATTERN = /^[\x21-\x7e]{1,1024}$/;
@@ -93,7 +103,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
   private active = 0;
   private readonly waiting: Array<() => void> = [];
 
-  constructor(options: RemoteEvidenceTransportOptions = {}) {
+  constructor(private readonly options: RemoteEvidenceTransportOptions = {}) {
     this.limits = { ...REMOTE_EVIDENCE_LIMITS, ...options.limits };
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.credentials = options.credentials ?? {};
@@ -101,20 +111,47 @@ export class RemoteEvidenceTransport implements RemoteLookups {
     this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   }
 
+  withLimits(limits: Partial<RemoteEvidenceLimits>): RemoteEvidenceTransport {
+    return new RemoteEvidenceTransport({ ...this.options, limits: { ...this.limits, ...limits } });
+  }
+
   async getJson(url: string): Promise<RemoteJsonResult> {
+    const result = await this.read(url, 'application/json', (bytes, status) => {
+      try {
+        return JSON.parse(bytes.toString('utf8'));
+      } catch {
+        throw new RemoteFailure('invalid-json', 'The response is not valid JSON.', status);
+      }
+    });
+    if (!result.ok) return result;
+    const { value: json, record } = result;
+    return { ok: true, json, record };
+  }
+
+  async getBytes(url: string): Promise<RemoteBytesResult> {
+    const result = await this.read(url, '*/*', bytes => bytes);
+    if (!result.ok) return result;
+    const { value: bytes, record } = result;
+    return { ok: true, bytes, record };
+  }
+
+  private async read<T>(url: string, accept: string, decode: (bytes: Buffer, status: number) => T): Promise<
+    { ok: true; value: T; record: RemoteEvidenceRecord }
+    | { ok: false; reason: RemoteFailureReason; status?: number; record: RemoteEvidenceRecord }
+  > {
     const record: RemoteEvidenceRecord = { url, fetchedAt: new Date(this.now()).toISOString() };
     this.records.push(record);
     if (this.inFlight++ === 0) this.busySince = this.now();
     await this.acquireSlot();
     const attempts: RemoteEvidenceAttempt[] = [];
     try {
-      const { json, status, bytes, finalUrl } = await this.fetchJson(url, attempts);
+      const { value, status, bytes, finalUrl } = await this.fetchBody(url, accept, decode, attempts);
       record.fetchedAt = new Date(this.now()).toISOString();
       record.status = status;
       record.bytes = bytes.length;
       record.sha256 = sha256Digest(bytes);
       if (finalUrl !== url) record.finalUrl = finalUrl;
-      return { ok: true, json, record };
+      return { ok: true, value, record };
     } catch (error) {
       const failure = error instanceof RemoteFailure ? error : networkFailure(error);
       record.fetchedAt = new Date(this.now()).toISOString();
@@ -129,7 +166,12 @@ export class RemoteEvidenceTransport implements RemoteLookups {
     }
   }
 
-  private async fetchJson(url: string, attempts: RemoteEvidenceAttempt[]): Promise<{ json: unknown; status: number; bytes: Buffer; finalUrl: string }> {
+  private async fetchBody<T>(
+    url: string,
+    accept: string,
+    decode: (bytes: Buffer, status: number) => T,
+    attempts: RemoteEvidenceAttempt[]
+  ): Promise<{ value: T; status: number; bytes: Buffer; finalUrl: string }> {
     let current: URL;
     try {
       current = new URL(url);
@@ -142,7 +184,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
       if (!isAllowedRemoteUrl(current)) {
         throw new RemoteFailure('not-allowed', `${redirects ? 'Redirected to' : 'Requested'} a host or path the tool may not read: ${shortUrl(current.toString())}`);
       }
-      const attempt = await this.send(current, attempts);
+      const attempt = await this.send(current, accept, attempts);
       try {
         const { response } = attempt;
         const { status } = response;
@@ -179,11 +221,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
         const bytes = await this.readBody(response);
         // The abort timer may not have fired yet for a response that finished after its limit.
         attempt.checkDeadline();
-        try {
-          return { json: JSON.parse(bytes.toString('utf8')), status, bytes, finalUrl: current.toString() };
-        } catch {
-          throw new RemoteFailure('invalid-json', 'The response is not valid JSON.', status);
-        }
+        return { value: decode(bytes, status), status, bytes, finalUrl: current.toString() };
       } catch (error) {
         // A body read cut off by the timer surfaces as an abort error; report the limit instead.
         if (!(error instanceof RemoteFailure) && attempt.signal.aborted) throw attempt.abortFailure();
@@ -196,7 +234,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
 
   // One HTTP request, after checking the evaluation's request, byte and time budgets. The returned timer also
   // covers reading the body; the caller clears it.
-  private async send(url: URL, attempts: RemoteEvidenceAttempt[]): Promise<{
+  private async send(url: URL, accept: string, attempts: RemoteEvidenceAttempt[]): Promise<{
     response: Response;
     signal: AbortSignal;
     clear: () => void;
@@ -213,7 +251,7 @@ export class RemoteEvidenceTransport implements RemoteLookups {
     this.requestCount++;
     attempts.push({ url: url.toString() });
 
-    const headers: Record<string, string> = { accept: 'application/json', 'user-agent': 'folio-module-evaluator' };
+    const headers: Record<string, string> = { accept, 'user-agent': 'folio-module-evaluator' };
     if (authorization) headers.authorization = authorization;
     const byDeadline = remaining < this.limits.requestTimeoutMs;
     const limit = byDeadline ? remaining : this.limits.requestTimeoutMs;

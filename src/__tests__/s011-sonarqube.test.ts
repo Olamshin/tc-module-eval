@@ -73,6 +73,8 @@ function recordingReads(inner: RemoteLookups, reads: Set<string>): RemoteLookups
   };
   return {
     records: inner.records,
+    getBytes: url => inner.getBytes(url),
+    withLimits: limits => inner.withLimits(limits),
     async getJson(url: string) {
       const answer = await inner.getJson(url);
       const endpoint = sonarCloudEndpoint(url);
@@ -291,6 +293,8 @@ describe('S011 SonarQube findings', () => {
         responses: MOD_SEARCH,
         lookups: inner => ({
           records: inner.records,
+          getBytes: url => inner.getBytes(url),
+          withLimits: limits => inner.withLimits(limits),
           async getJson(url: string) {
             const answer = await inner.getJson(url);
             if (!url.includes('project_analyses/search') || ++analyses === 1 || !answer.ok) return answer;

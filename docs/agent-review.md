@@ -128,6 +128,29 @@ I/O, then tenant/provisioning helpers, runtime callers, and effective client bou
 The agent summary labels exception propagation with unknown duration neutrally;
 this projection does not change deterministic analysis.
 
+A FOLIO library can read environment variables and configure the datasource, Liquibase,
+Kafka, or HTTP clients without any reference in the module's code; folio-spring-base,
+for example, sets PostgreSQL's `statement_timeout` from `DB_QUERYTIMEOUT`. The agent is
+told never to call a setting unused because repository code does not mention it. With
+`--allow-remote-lookups`, it can also read those libraries: for each production `org.folio`
+dependency in the module's build files (S009's dependency evidence, so modules of the
+same repository are left out), the evaluator downloads the released sources jar of the
+version the build files set from `repository.folio.org/repository/maven-releases/` and
+puts its text files under `folio-library-sources/<groupId>/<artifactId>/<version>/` in the
+review workspace, with `.criterion-agent/S010/library-sources.json` listing each library.
+A library is skipped, and the report says why, when the repository's build files do not
+set its version (a parent POM or BOM outside the repository may), the version is a
+snapshot, a variable or not a single release, it has no sources jar, or the review has
+read 12 libraries already. The downloads have their own budget of 24 requests, 12 MiB and
+60 s, so they never use up the remote lookups of other criteria. Unpacking keeps text files
+of at most 1 MiB under safe relative paths, and skips links, binaries, repeated or
+conflicting paths, and anything past 2,000 files per library or 32 MiB in all; a library
+that lost text files that way is marked incomplete for the agent and in the report. The agent may cite library files only alongside a repository file. A
+repository with its own `folio-library-sources/` folder gets no review rather than a mix
+of both. The S010 details list what was read, under "FOLIO library source prepared for the
+agent review", and each download under "Library source downloads". The downloads happen
+only when S010 is manual or failed and its agent review is enabled.
+
 ## S011 SonarQube Suppression Review
 
 S011 review runs for a deterministic `manual` result when the repository or its CI suppresses a Sonar rule or narrows the analysis scope. The evaluator groups suppressions by rule and file, with stable IDs such as `suppression:java:S2077:src/main/java/org/folio/search/service/reindex/jdbc/SubjectRepository.java`, `nosonar:<path>` and `all:<path>`, and scope settings by file (`scope:pom.xml`). Each group comes with its lines, rule name, the FOLIO guidance it departs from, and adjacent comments, in `.criterion-agent/S011/review-groups.json`.

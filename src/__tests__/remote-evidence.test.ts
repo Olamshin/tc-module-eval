@@ -4,6 +4,7 @@ const FAR = 'https://far.ci.folio.org/applications?query=id%3D%3Dapp-a-1.0.0';
 const SONAR = 'https://sonarcloud.io/api/components/show?component=org.folio:mod-x';
 const GITHUB = 'https://api.github.com/repos/folio-org/platform-lsp/commits?sha=snapshot';
 const RAW = 'https://raw.githubusercontent.com/folio-org/platform-lsp/abc/platform-descriptor.json';
+const RELEASES = 'https://repository.folio.org/repository/maven-releases';
 
 interface Call { url: string; authorization?: string }
 
@@ -61,7 +62,21 @@ describe('remote evidence transport', () => {
     ['https://api.github.com/repos/someone/folio-integration-tests/contents/', false],
     ['https://raw.githubusercontent.com/folio-org/folio-integration-tests/master/mod-users/pom.xml', false],
     ['https://api.github.com/user', false],
-    ['https://sonarcloud.io/account', false]
+    ['https://sonarcloud.io/account', false],
+    [`${RELEASES}/org/folio/folio-spring-base/10.0.1/folio-spring-base-10.0.1-sources.jar`, true],
+    [`${RELEASES}/org/folio/okapi/okapi-common/6.1.0/okapi-common-6.1.0-sources.jar`, true],
+    [`${RELEASES}/org/folio/folio-spring-base/10.0.1/folio-spring-base-10.0.1.jar`, false],
+    [`${RELEASES}/org/folio/folio-spring-base/10.0.1/folio-spring-base-10.0.1.pom`, false],
+    [`${RELEASES}/org/folio/folio-spring-base/10.0.1/folio-spring-cql-10.0.1-sources.jar`, false],
+    [`${RELEASES}/org/folio/folio-spring-base/10.0.1/folio-spring-base-10.0.2-sources.jar`, false],
+    [`${RELEASES}/org/folio/folio-spring-base/latest/folio-spring-base-latest-sources.jar`, false],
+    [`${RELEASES}/com/example/x/1.0.0/x-1.0.0-sources.jar`, false],
+    [`${RELEASES}/org/folio-evil/x/1.0.0/x-1.0.0-sources.jar`, false],
+    [`${RELEASES}/org/folio/x%2F..%2Fy/1.0.0/x%2F..%2Fy-1.0.0-sources.jar`, false],
+    ['https://repository.folio.org/repository/maven-snapshots/org/folio/x/1.0.0-SNAPSHOT/x-1.0.0-SNAPSHOT-sources.jar', false],
+    ['https://repository.folio.org/repository/maven-folio/org/folio/x/1.0.0/x-1.0.0-sources.jar', false],
+    ['https://repository.folio.org/repository/yarnpkg-registry/left-pad', false],
+    ['https://repository.folio.org/repository/docker-hub-auth/v2/library/x/blobs/sha256:00', false]
   ])('allows %s: %s', (url, allowed) => {
     expect(isAllowedRemoteUrl(new URL(url))).toBe(allowed);
   });
@@ -81,6 +96,17 @@ describe('remote evidence transport', () => {
     ]);
     expect(missing).toMatchObject({ ok: false, reason: 'http-status', status: 404 });
     expect(refused).toMatchObject({ ok: false, reason: 'not-allowed' });
+  });
+
+  it('returns a binary body as bytes and records it like any other read', async () => {
+    const jar = `${RELEASES}/org/folio/x/1.0.0/x-1.0.0-sources.jar`;
+    const bytes = Buffer.from([0x50, 0x4b, 0x05, 0x06, 0x00, 0xff]);
+    const { remote } = transport(() => new Response(bytes, { status: 200 }));
+
+    const result = await remote.getBytes(jar);
+
+    expect(result).toMatchObject({ ok: true, bytes });
+    expect(remote.records).toEqual([{ url: jar, fetchedAt: expect.any(String), status: 200, bytes: 6, sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) }]);
   });
 
   it('refuses a redirect off the allowlist without requesting it', async () => {
