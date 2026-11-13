@@ -12,11 +12,14 @@ import {
 import { FRAMEWORK_LABELS } from './b001-descriptor-template';
 import { descriptorEndpoints, EndpointMatcher, endpointLibraries, endpointMatcher, gapCovers, lookup, pathIndex, uniqueEndpoints } from './backend-endpoints';
 import { endpointFramework } from './backend-evidence';
-import { HEALTH_ROUTE, routerRoutes, sourceRoutes } from './backend-routes';
+import { HEALTH_ROUTE, routerRoutes, sourceRoutes, withoutComments } from './backend-routes';
 import { frontendChecklist, renderFrontendChecklistLines } from './frontend-checklist';
 import { count, listText, overflowLine, reportPath, reportText, unique } from './report-text';
 
 const MAX_ROWS = 20;
+// Like the health check, the path Spring forwards failed requests to is not part of the module's API.
+const ERROR_ROUTE = '/error';
+const ERROR_CONTROLLER = /\bimplements\s[\w.\s,<>]{0,500}?\bErrorController\b/;
 
 /**
  * B006 (all API endpoints documented in OpenAPI) looks up every endpoint the module serves in the repository's API
@@ -53,7 +56,10 @@ export function evaluateB006(evidence: BackendEvidence, apiSpecs: BackendApiSpec
     const spring = endpointFramework(evidence) === 'spring';
     const scan = (spring ? sourceRoutes : routerRoutes)(evidence.snapshot.files);
     ({ unreadRoutes, unreadRouteCount } = scan);
-    matchers = uniqueEndpoints(scan.routes.filter(route => route.path !== HEALTH_ROUTE)).map(endpointMatcher);
+    const errorControllers = new Set(evidence.snapshot.files
+      .filter(file => file.content.includes('ErrorController') && ERROR_CONTROLLER.test(withoutComments(file.content)))
+      .map(file => file.path));
+    matchers = uniqueEndpoints(scan.routes.filter(route => route.path !== HEALTH_ROUTE && !(route.path === ERROR_ROUTE && errorControllers.has(route.file)))).map(endpointMatcher);
     endpointSource = spring ? 'router routes and Spring mapping annotations in src/main' : 'router routes in src/main';
     if (!matchers.length) {
       return result(EvaluationStatus.MANUAL, 'no-routes',

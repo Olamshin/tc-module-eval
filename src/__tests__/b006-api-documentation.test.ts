@@ -385,6 +385,29 @@ describe('B006 API documentation', () => {
     ]);
   });
 
+  it('leaves out the error path of an edge module\'s Spring ErrorController', async () => {
+    const controller = (name: string, body: string, implemented = '') =>
+      `@RestController\npublic class ${name}${implemented} {\n${body}\n}\n`;
+    const root = repository({
+      'pom.xml': pom('edge-example', `<dependencies>${dependency('edge-common-spring')}</dependencies>`),
+      ...springApp,
+      'descriptors/ModuleDescriptor-template.json': '{"id": "${artifactId}-1.0.0", "provides": []}',
+      'src/main/java/org/example/AccountsController.java': controller('AccountsController', '  @GetMapping("/example/accounts") public String get() { return null; }'),
+      'src/main/java/org/example/ReadinessController.java': controller('ReadinessController', '  @GetMapping("/admin/ready") public String ready() { return null; }'),
+      'src/main/java/org/example/ErrorControllerImpl.java': controller('ErrorControllerImpl',
+        '  @GetMapping("/error") public String get() { return null; }\n  @PostMapping("/error") public String post() { return null; }', ' implements ErrorController'),
+      // Only the class Spring forwards errors to is left out; another mapping on /error is part of the API.
+      'src/main/java/org/example/LegacyController.java': controller('LegacyController',
+        '  @PutMapping("/error") public String put() { return null; }', ' /* implements ErrorController */'),
+      'src/main/resources/swagger.api/edge-example.yaml': 'openapi: 3.0.0\npaths:\n  /example/accounts:\n    get: {}\n'
+    });
+
+    const { result, analysis } = await b006(root);
+
+    expect(documentation(analysis)).toEqual({ 'GET /example/accounts': 'openapi', 'GET /admin/ready': 'undocumented', 'PUT /error': 'undocumented' });
+    expect(result.status).toBe(EvaluationStatus.FAIL);
+  });
+
   it('ignores router routes in line and block comments', async () => {
     const root = repository({
       'pom.xml': pom('edge-example', `<dependencies>${dependency('edge-common')}</dependencies>`),
