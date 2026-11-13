@@ -4,7 +4,7 @@ import path from 'path';
 import { SharedEvaluator } from '../evaluators/shared/shared-evaluator';
 import { CriterionResult, EvaluationStatus, RemoteLookups, S011Analysis } from '../types';
 import { createEvaluationRun } from '../utils/evaluation-run';
-import { SONAR_SCOPE_SETTING_KEYS } from '../utils/sonarcloud-snapshot';
+import { collectSonarCloudSnapshot, SONAR_SCOPE_SETTING_KEYS, sonarSnapshotFreshness } from '../utils/sonarcloud-snapshot';
 import { SONARCLOUD_KEPT_FIELDS, sonarCloudEndpoint } from '../tools/sonarcloud-fixture-trim';
 import { loadRemoteFixture, RecordedResponses, replayTransport } from './helpers/remote-replay';
 
@@ -12,6 +12,7 @@ class TestEvaluator extends SharedEvaluator {}
 
 // Recorded from SonarCloud by `yarn capture:remote-fixtures --sonar <checkout>`; each at the commit below.
 const MOD_SEARCH = loadRemoteFixture('sonarcloud-mod-search');
+const MOD_SEARCH_V6_0_11 = loadRemoteFixture('sonarcloud-mod-search-v6.0.11');
 const MOD_USERS = loadRemoteFixture('sonarcloud-mod-users');
 const MOD_AGREEMENTS = loadRemoteFixture('sonarcloud-mod-agreements');
 const UI_AGREEMENTS = loadRemoteFixture('sonarcloud-ui-agreements');
@@ -341,44 +342,28 @@ describe('S011 SonarQube findings', () => {
     });
 
     describe('on a tag SonarCloud keeps as a SHORT branch', () => {
-      const tag = 'v6.0.11';
-      const onTag = (analysisDates: string[]) => {
-        const moved = Object.fromEntries(Object.entries(MOD_SEARCH).map(([url, response]) => [url.replace('&branch=master', `&branch=${tag}`), response]));
-        const analyses = Object.keys(moved).find(url => url.includes('project_analyses/search'))!;
-        moved[analyses] = { status: 400, body: { errors: [{ msg: `Branch '${tag}' is not of type LONG` }] } };
-        let listReads = 0;
-        const lookups = (inner: RemoteLookups): RemoteLookups => ({
-          records: inner.records,
-          getBytes: url => inner.getBytes(url),
-          withLimits: limits => inner.withLimits(limits),
-          async getJson(url: string) {
-            const answer = await inner.getJson(url);
-            if (!url.includes('project_branches/list') || !answer.ok) return answer;
-            const date = analysisDates[Math.min(listReads++, analysisDates.length - 1)];
-            const json = JSON.parse(JSON.stringify(answer.json));
-            json.branches.push({ name: tag, isMain: false, type: 'SHORT', analysisDate: date, commit: { sha: COMMITS['mod-search'] } });
-            return { ...answer, json };
-          }
-        });
-        return { responses: moved, lookups, branch: tag, reads: () => listReads };
-      };
+      // mod-search v6.0.11: no issues or hotspots in code that differs from master, which has them.
+      const commit = 'af43b821ad70322c2b10f88be8ee53625de6c059';
 
-      it('reads its analysis from the branch list instead of the analyses SonarCloud refuses for it', async () => {
-        const options = onTag(['2026-10-15T11:00:42+0000']);
-        const result = await evaluate(await repo('mod-search'), options);
-
-        expect(result.status).toBe(EvaluationStatus.FAIL);
-        expect(result.details).toContain(`  - Project: org.folio:mod-search, branch ${tag}`);
-        expect(result.requested.filter(url => url.includes('project_analyses/search'))).toEqual([]);
-        expect(options.reads()).toBe(2);
-        expect(result.requested.some(url => url.includes('branch=master'))).toBe(false);
-      });
-
-      it('is manual when the branch list shows a newer analysis on the second read', async () => {
-        const result = await evaluate(await repo('mod-search'), onTag(['2026-10-15T11:00:42+0000', '2026-10-16T08:00:00+0000']));
+      it('stays manual, reading the analysis from the branch list and never the main branch', async () => {
+        const result = await evaluate(await repo('mod-search'), { responses: MOD_SEARCH_V6_0_11, branch: 'v6.0.11', commit });
 
         expect(result.status).toBe(EvaluationStatus.MANUAL);
-        expect(result.evidence).toContain('SonarCloud analysed the project again while the tool was reading it (2026-10-15 and 2026-10-16)');
+        expect(result.evidence).toBe('S011 manual: SonarCloud\'s analysis of branch v6.0.11 (2026-10-29, commit af43b82) is of a short-lived branch scoped against master, '
+          + 'so its issue and hotspot counts cover only the code that differs from master, not the whole module. '
+          + 'A reviewer needs to check the module\'s issues and hotspots in SonarCloud (org.folio:mod-search).');
+        expect(result.requested.filter(url => url.includes('project_analyses/search') || url.includes('branch=master'))).toEqual([]);
+      });
+
+      it('keeps its measures as information, and S013 cannot use them', async () => {
+        const replay = replayTransport(MOD_SEARCH_V6_0_11);
+        const snapshot = await collectSonarCloudSnapshot(replay.transport, 'org.folio:mod-search', 'v6.0.11');
+
+        expect([snapshot.shortBranch, snapshot.analysis?.revision, snapshot.measures.coverage, snapshot.measures.lines_to_cover])
+          .toEqual([{ mergeBranch: 'master' }, commit, 94.6, 7663]);
+        expect([snapshot.highIssues.total, snapshot.securityIssues.total, snapshot.hotspotsToReview.total]).toEqual([0, 0, 0]);
+        expect(sonarSnapshotFreshness(snapshot, commit)).toMatchObject({ fresh: false, reason: 'short-branch' });
+        expect(replay.unrecorded).toEqual([]);
       });
     });
 

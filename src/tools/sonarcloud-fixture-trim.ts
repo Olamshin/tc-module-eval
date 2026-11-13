@@ -10,7 +10,7 @@ import { isRecord } from '../utils/type-guards';
  * array element. Endpoints not listed are small and kept whole.
  */
 export const SONARCLOUD_KEPT_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  'project_branches/list': ['branches[].name', 'branches[].isMain', 'branches[].type', 'branches[].analysisDate', 'branches[].commit.sha'],
+  'project_branches/list': ['branches[].name', 'branches[].isMain', 'branches[].type', 'branches[].analysisDate', 'branches[].commit.sha', 'branches[].mergeBranch'],
   'issues/search': [
     'total', 'p', 'ps', 'paging', 'facets',
     'issues[].rule', 'issues[].component', 'issues[].line', 'issues[].message', 'issues[].impacts'

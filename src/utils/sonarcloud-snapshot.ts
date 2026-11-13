@@ -75,6 +75,15 @@ export function sonarSnapshotFreshness(snapshot: SonarCloudSnapshot, repositoryC
   const analysis = snapshot.analysis;
   if (!analysis) return { fresh: false, reason: 'no-analysis', message: snapshot.problem ?? 'SonarCloud has no analysis to compare.' };
   const analysed = analysis.revision ? `commit ${analysis.revision.slice(0, 7)}` : 'an unrecorded commit';
+  if (snapshot.shortBranch) {
+    const against = snapshot.shortBranch.mergeBranch ?? 'its merge branch';
+    return {
+      fresh: false,
+      reason: 'short-branch',
+      message: `SonarCloud's analysis of branch ${snapshot.branch} (${analysis.date.slice(0, 10)}, ${analysed}) is of a short-lived branch scoped against ${against}, `
+        + `so its issue and hotspot counts cover only the code that differs from ${against}, not the whole module.`
+    };
+  }
   const on = `SonarCloud's latest analysis of branch ${snapshot.branch} (${analysis.date.slice(0, 10)}) is of ${analysed}`;
   if (!repositoryCommit) return { fresh: false, reason: 'unknown-commit', message: `${on}, and the evaluated commit is not known, so the tool cannot tell whether its findings apply.` };
   if (!analysis.revision) return { fresh: false, reason: 'no-revision', message: `${on}, so the tool cannot tell whether its findings apply to the evaluated commit ${repositoryCommit.slice(0, 7)}.` };
@@ -159,6 +168,10 @@ export async function collectSonarCloudSnapshot(
   }
   snapshot.branch = branch.name;
   snapshot.branchIsMain = branch.main;
+  if (branch.short) {
+    const mergeBranch = branch.listed?.mergeBranch;
+    snapshot.shortBranch = typeof mergeBranch === 'string' ? { mergeBranch } : {};
+  }
   if (requestedBranch && !requested) snapshot.requestedBranchNotAnalysed = requestedBranch;
   const onBranch = (params: Record<string, string>) => ({ ...params, branch: branch.name });
 
