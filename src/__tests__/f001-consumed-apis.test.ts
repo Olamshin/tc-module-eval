@@ -89,6 +89,32 @@ describe('F001 consumed interfaces', () => {
     expect(analysis.siteCount).toBe(2);
   });
 
+  it('follows mutator GET options through constants and spreads, and leaves options it cannot read to the reviewer', async () => {
+    writePackage({ okapiInterfaces: { circulation: '14.0' } });
+    write('src/Session.js', [
+      "const options = { path: 'circulation/end-patron-action-session' };",
+      'export default class Session {',
+      '  end = () => this.props.mutator.loans.GET(options);',
+      '  page = () => this.props.mutator.loans.GET({ ...options, params: { limit: 10 } });',
+      '}'
+    ].join('\n'));
+    commit();
+
+    const constant = await evaluate();
+    expect(constant.result.status).toBe(EvaluationStatus.FAIL);
+    expect(constant.analysis.undeclared.map(use => [use.id, use.sites.map(site => `${site.path}:${site.line} ${site.method} ${site.requestPath}`)])).toEqual([
+      ['patron-action-session', ['src/Session.js:3 GET circulation/end-patron-action-session', 'src/Session.js:4 GET circulation/end-patron-action-session']]
+    ]);
+
+    write('src/Session.js', 'export const end = (mutator, options) => mutator.loans.GET(options);\n');
+    commit();
+    const parameter = await evaluate();
+    expect(parameter.result.status).toBe(EvaluationStatus.MANUAL);
+    expect(parameter.analysis.unresolvedSites.map(site => [`${site.path}:${site.line}`, site.outcome, site.unresolved])).toEqual([
+      ['src/Session.js:1', 'unresolved', 'the options passed to GET could not be read']
+    ]);
+  });
+
   it('stays manual, and names the candidates, when a request cannot be read or could reach several interfaces', async () => {
     writePackage({ okapiInterfaces: { users: '16.5', configuration: '2.0' } });
     // A path constant in a test fixture is not production code, so the tool does not read it.

@@ -41,28 +41,28 @@ class PathResolver {
 
   sitesOf(file: FrontendSourceFile): UiRequestSite[] {
     const sites: UiRequestSite[] = [];
-    const add = (node: ts.Node, kind: UiRequestSiteKind, method: string | undefined, expression: ts.Expression | undefined, prefix: Part[] = [], hops = 0): void => {
+    const add = (node: ts.Node, kind: UiRequestSiteKind, method: string | undefined, expression: ts.Expression | undefined, prefix: Part[] = [], hops = 0, from = file): void => {
       const value = expression && hops <= MAX_DEPTH ? unwrap(expression) : undefined;
       if (value && ts.isConditionalExpression(value)) {
         for (const branch of [value.whenTrue, value.whenFalse]) {
-          if (!isNothing(branch)) add(node, kind, method, branch, prefix, hops + 1);
+          if (!isNothing(branch)) add(node, kind, method, branch, prefix, hops + 1, from);
         }
         return;
       }
       // A stripes-connect path function sends the request each of its return statements names, if any.
-      const fn = value && this.functionOf(value, file);
+      const fn = value && this.functionOf(value, from);
       const returned = fn ? returnedExpressions(fn).filter(item => !isNothing(item) && !ts.isObjectLiteralExpression(unwrap(item))) : [];
-      if (returned.length) return returned.forEach(item => add(node, kind, method, item, prefix, hops + 1));
+      if (returned.length) return returned.forEach(item => add(node, kind, method, item, prefix, hops + 1, from));
       const site: UiRequestSite = {
         path: file.path,
         line: lineOf(file.sourceFile, node.getStart(file.sourceFile)),
         kind,
         ...(method ? { method } : {}),
-        expression: expression ? oneLine(expression.getText(file.sourceFile)) : '(none)'
+        expression: expression ? oneLine(expression.getText(from.sourceFile)) : '(none)'
       };
       const built = !expression ? { unresolved: 'the request names no path' }
         : fn ? { unresolved: 'the path is computed by a function that returns no path the tool can read' }
-          : requestPath([...prefix, ...(prefix.length ? ['/'] : []), ...this.evaluate(expression, file, 0)]);
+          : requestPath([...prefix, ...(prefix.length ? ['/'] : []), ...this.evaluate(expression, from, 0)]);
       if (built.external) return;
       sites.push({ ...site, ...(built.requestPath !== undefined ? { requestPath: built.requestPath } : {}),
         ...(built.openEnd ? { openEnd: true } : {}), ...(built.unresolved ? { unresolved: built.unresolved } : {}) });
@@ -82,9 +82,13 @@ class PathResolver {
         const callee = node.expression;
         const [first, options] = node.arguments;
         if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'GET' && isMutatorResource(callee.expression)) {
-          const getOptions = first && unwrap(first);
-          const path = getOptions && ts.isObjectLiteralExpression(getOptions) ? property(getOptions, 'path') : undefined;
-          if (path) add(node, 'stripes-connect', 'GET', path);
+          const path = first && this.optionsPath(first, file, 0);
+          if (path && 'unresolved' in path) {
+            sites.push({ path: file.path, line: lineOf(file.sourceFile, node.getStart(file.sourceFile)), kind: 'stripes-connect', method: 'GET',
+              expression: oneLine(first.getText(file.sourceFile)), unresolved: path.unresolved });
+          } else if (path) {
+            add(node, 'stripes-connect', 'GET', path.expression, [], 0, path.file);
+          }
         } else if (ts.isPropertyAccessExpression(callee) && KY_METHODS.has(callee.name.text)) {
           const prefix = this.kyPrefix(callee.expression, file, 0);
           if (prefix) add(node, 'ky', callee.name.text.toUpperCase(), first, prefix);
@@ -125,6 +129,31 @@ class PathResolver {
       if (prefix) return prefix;
     }
     return KY_INSTANCE_NAMES.has(node.text) ? [] : undefined;
+  }
+
+  private optionsPath(expression: ts.Expression, file: FrontendSourceFile, depth: number):
+    { expression: ts.Expression; file: FrontendSourceFile } | { unresolved: string } | undefined {
+    const unreadable = { unresolved: 'the options passed to GET could not be read' };
+    const node = unwrap(expression);
+    if (depth > MAX_DEPTH) return { unresolved: 'its constants refer to each other too deeply' };
+    if (ts.isIdentifier(node)) {
+      const resolved = this.resolveIdentifier(node, file, depth);
+      if (resolved.kind === 'unresolved') return { unresolved: resolved.reason };
+      return resolved.kind === 'value' ? this.optionsPath(resolved.node, resolved.file, depth + 1) : unreadable;
+    }
+    if (!ts.isObjectLiteralExpression(node)) return unreadable;
+    let path: ReturnType<PathResolver['optionsPath']>;
+    for (const item of node.properties) {
+      if (ts.isSpreadAssignment(item)) {
+        path = this.optionsPath(item.expression, file, depth + 1) ?? path;
+      } else if (item.name && (ts.isIdentifier(item.name) || ts.isStringLiteral(item.name)) && item.name.text === 'path') {
+        if (ts.isPropertyAssignment(item)) path = { expression: item.initializer, file };
+        else if (ts.isShorthandPropertyAssignment(item)) path = { expression: item.name, file };
+      } else if (item.name && ts.isComputedPropertyName(item.name)) {
+        path = unreadable;
+      }
+    }
+    return path;
   }
 
   private functionOf(node: ts.Expression, file: FrontendSourceFile): ts.FunctionLikeDeclaration | undefined {
