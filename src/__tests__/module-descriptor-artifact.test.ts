@@ -366,22 +366,63 @@ describe('module-descriptor-artifact', () => {
       expect(fs.readdirSync(repo).sort()).toEqual(['module-descriptor.json', 'package.json']);
     });
 
-    it('should notice a write through a committed in-repository symlink and restore its target', async () => {
+    it('should not run anything when a root descriptor is a committed symlink, dangling or not', async () => {
+      for (const linkTarget of [path.join('descriptors', 'generated.json'), 'missing.json']) {
+        const repo = stripesRepo();
+        fs.mkdirSync(path.join(repo, 'descriptors'));
+        fs.writeFileSync(path.join(repo, 'descriptors', 'generated.json'), JSON.stringify({ id: 'folio_example-0.9.0' }));
+        fs.symlinkSync(linkTarget, path.join(repo, 'module-descriptor.json'));
+        const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'missing.json'), '{}'));
+
+        const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+        expect(runner.calls).toEqual([]);
+        expect(result.status).toBe('unsafe-to-run');
+        expect(result.errors).toEqual([
+          'module-descriptor.json at the repository root is a symbolic link, and a committed descriptor symlink cannot be safely regenerated, so the build-mod-descriptor script was not run.'
+        ]);
+        expect(fs.readdirSync(repo).sort()).toEqual(['descriptors', 'module-descriptor.json', 'package.json']);
+      }
+    });
+
+    it('should not run anything when a root descriptor cannot be fully backed up', async () => {
+      const cases: Array<[(repo: string) => void, string]> = [
+        [repo => fs.writeFileSync(path.join(repo, 'ModuleDescriptor.json'), Buffer.alloc(8 * 1024 * 1024 + 1, 32)), 'it is larger than 8 MiB'],
+        [repo => fs.mkdirSync(path.join(repo, 'ModuleDescriptor.json')), 'it is not a regular file']
+      ];
+      for (const [arrange, reason] of cases) {
+        const repo = stripesRepo();
+        arrange(repo);
+        const runner = scriptRunner(repo, () => undefined);
+
+        const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+        expect(runner.calls).toEqual([]);
+        expect(result.status).toBe('unsafe-to-run');
+        expect(result.errors).toEqual([`ModuleDescriptor.json at the repository root could not be backed up (${reason}), so the build-mod-descriptor script was not run.`]);
+        expect(fs.existsSync(path.join(repo, '.npmrc'))).toBe(false);
+      }
+    });
+
+    it('should clean up and restore even when the runner rejects after the install', async () => {
       const repo = stripesRepo();
-      fs.mkdirSync(path.join(repo, 'descriptors'));
-      const target = path.join(repo, 'descriptors', 'generated.json');
+      const descriptor = path.join(repo, 'module-descriptor.json');
       const committed = Buffer.from(JSON.stringify({ id: 'folio_example-0.9.0' }));
-      fs.writeFileSync(target, committed);
-      fs.symlinkSync(path.join('descriptors', 'generated.json'), path.join(repo, 'module-descriptor.json'));
-      const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_example-1.0.0' })));
+      fs.writeFileSync(descriptor, committed);
+      const runner = new FakeRunner(request => {
+        if (request.args?.[0] === 'install') {
+          fs.mkdirSync(path.join(repo, 'node_modules'));
+          return commandResult(request);
+        }
+        fs.writeFileSync(descriptor, '');
+        fs.writeFileSync(path.join(repo, 'ModuleDescriptor.json'), '{}');
+        throw new Error('runner crashed');
+      });
 
-      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+      await expect(produceModuleDescriptorArtifact(repo, undefined, runner)).rejects.toThrow('runner crashed');
 
-      expect(result.status).toBe('produced');
-      expect(result.descriptorPath).toBe('module-descriptor.json');
-      expect(result.content).toBe(JSON.stringify({ id: 'folio_example-1.0.0' }));
-      expect(fs.readlinkSync(path.join(repo, 'module-descriptor.json'))).toBe(path.join('descriptors', 'generated.json'));
-      expect(fs.readFileSync(target).equals(committed)).toBe(true);
+      expect(fs.readdirSync(repo).sort()).toEqual(['module-descriptor.json', 'package.json']);
+      expect(fs.readFileSync(descriptor).equals(committed)).toBe(true);
     });
 
     it('should need manual review when .npmrc cannot be written', async () => {
