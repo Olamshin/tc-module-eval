@@ -361,6 +361,22 @@ describe('S013 unit test coverage and test technologies', () => {
       expect(withTestNg.evidence).toContain('The tests use JUnit and TestNG, and the supported-technologies page does not list TestNG.');
     });
 
+    it('counts only @bigtest/cli as a BigTest runner, and shows other @bigtest packages as helpers', async () => {
+      const files = (devDependencies: Record<string, string>) => ({
+        'package.json': { name: '@folio/odd', devDependencies: { jest: '^29.7.0', '@bigtest/interactor': '^0.9.0', ...devDependencies } },
+        'yarn.lock': JEST_LOCKFILE
+      });
+      const helpers = await evaluate(await repository('ui-odd', files({})), { responses: sonarResponses('ui-odd', FULL_MEASURES('85.0')), commit: UI_USERS_COMMIT });
+      expect(helpers.status).toBe(EvaluationStatus.PASS);
+      expect(helpers.details!.split('\n').filter(row => row.includes('@bigtest/'))).toEqual([
+        '  - BigTest (@bigtest/interactor in package.json, devDependencies): testing helper, not covered by the supported-technologies page'
+      ]);
+
+      const runner = await evaluate(await repository('ui-even', files({ '@bigtest/cli': '^0.13.0' })), { responses: sonarResponses('ui-even', FULL_MEASURES('85.0')), commit: UI_USERS_COMMIT });
+      expect(runner.status).toBe(EvaluationStatus.MANUAL);
+      expect(runner.evidence).toContain('The tests use Jest and BigTest, and the supported-technologies page does not list BigTest.');
+    });
+
     it('never fails a module only for having no tests: it is manual unless its coverage fails', async () => {
       const files = { 'pom.xml': '<project><artifactId>mod-z</artifactId></project>' };
       const meets = await evaluate(await repository('mod-z', files), { responses: sonarResponses('mod-z', FULL_MEASURES('90.0')), commit: UI_USERS_COMMIT });
