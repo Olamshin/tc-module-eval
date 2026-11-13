@@ -150,18 +150,31 @@ async function runFrontendDescriptorStrategy(
     networkPolicy: NPM_NETWORK_POLICY
   };
   const before = snapshotRootDescriptors(repoPath);
-  const created = [
-    ...(pathExists(path.join(repoPath, 'node_modules')) ? [] : ['node_modules']),
-    ...((commandRunner.canRun?.(installRequest) ?? true) && writeFolioNpmrcIfMissing(repoPath) ? ['.npmrc'] : [])
-  ];
-
+  const hadNodeModules = pathExists(path.join(repoPath, 'node_modules'));
+  let wroteNpmrc = false;
   let result: ModuleDescriptorArtifact | undefined;
   try {
+    if (commandRunner.canRun?.(installRequest) ?? true) {
+      try {
+        wroteNpmrc = writeFolioNpmrcIfMissing(repoPath);
+      } catch (error) {
+        result = artifact('unsafe-to-run', {
+          strategy: 'frontend-script',
+          descriptorScript: scriptName,
+          errors: [`The evaluator could not write the .npmrc the dependency install needs: ${errorMessage(error)}`]
+        });
+        return result;
+      }
+    }
     result = await generateFrontendDescriptor(repoPath, scriptName, installRequest, before, evaluationRun, commandRunner);
     return result;
   } finally {
-    const leftovers = [...created, ...FRONTEND_DESCRIPTOR_NAMES.filter(name => !before.has(name))];
-    result?.warnings.push(...removeCreatedPaths(repoPath, leftovers));
+    const created = [
+      ...(hadNodeModules ? [] : ['node_modules']),
+      ...(wroteNpmrc ? ['.npmrc'] : []),
+      ...FRONTEND_DESCRIPTOR_NAMES.filter(name => !before.has(name))
+    ];
+    result?.warnings.push(...restoreRootDescriptors(repoPath, before), ...removeCreatedPaths(repoPath, created));
   }
 }
 
@@ -169,7 +182,7 @@ async function generateFrontendDescriptor(
   repoPath: string,
   scriptName: string,
   installRequest: CommandExecutionRequest,
-  before: Map<string, string>,
+  before: Map<string, RootDescriptorSnapshot>,
   evaluationRun: EvaluationRun | undefined,
   commandRunner: CommandRunner
 ): Promise<ModuleDescriptorArtifact> {
@@ -194,7 +207,7 @@ async function generateFrontendDescriptor(
 
   const selected = FRONTEND_DESCRIPTOR_NAMES
     .map(name => path.join(repoPath, name))
-    .find(candidate => pathSignature(candidate) !== before.get(path.basename(candidate)) && isSafeFinalDescriptor(repoPath, candidate));
+    .find(candidate => pathSignature(candidate) !== before.get(path.basename(candidate))?.signature && isSafeFinalDescriptor(repoPath, candidate));
   if (!selected) {
     return artifact('missing', {
       ...source,
@@ -206,8 +219,8 @@ async function generateFrontendDescriptor(
   const name = path.basename(selected);
   const produced: ModuleDescriptorArtifact = {
     ...selectedArtifact(repoPath, selected, 'frontend-script', command, new Set(before.keys())),
-    // A descriptor the script created is removed with the install, so only its content is kept.
-    absolutePath: before.has(name) ? selected : undefined,
+    // The script's output is removed or restored afterwards, so only its content is kept.
+    absolutePath: undefined,
     descriptorScript: scriptName,
     installCommand
   };
@@ -409,24 +422,87 @@ function isDescriptorTemplateName(fileName: string): boolean {
   return /moduledescriptor.*\.json$/i.test(fileName);
 }
 
-function snapshotRootDescriptors(repoPath: string): Map<string, string> {
-  const snapshot = new Map<string, string>();
+interface RootDescriptorSnapshot {
+  signature: string;
+  link?: string;
+  /** The in-repository regular file the name resolves to, and its bytes. */
+  target?: { path: string; bytes: Buffer };
+}
+
+function snapshotRootDescriptors(repoPath: string): Map<string, RootDescriptorSnapshot> {
+  const snapshot = new Map<string, RootDescriptorSnapshot>();
   for (const name of FRONTEND_DESCRIPTOR_NAMES) {
-    const signature = pathSignature(path.join(repoPath, name));
-    if (signature) {
-      snapshot.set(name, signature);
+    const candidate = path.join(repoPath, name);
+    const signature = pathSignature(candidate);
+    if (!signature) {
+      continue;
     }
+    const entry: RootDescriptorSnapshot = { signature };
+    try {
+      if (fs.lstatSync(candidate).isSymbolicLink()) {
+        entry.link = fs.readlinkSync(candidate);
+      }
+      if (isSafeFinalDescriptor(repoPath, candidate) && fs.statSync(candidate).isFile()) {
+        const bytes = readBoundedFileBytes(candidate, MAX_GENERATED_DESCRIPTOR_BYTES + 1);
+        if (bytes.length <= MAX_GENERATED_DESCRIPTOR_BYTES) {
+          entry.target = { path: fs.realpathSync(candidate), bytes };
+        }
+      }
+    } catch {
+      entry.target = undefined;
+    }
+    snapshot.set(name, entry);
   }
   return snapshot;
 }
 
-function pathSignature(candidatePath: string): string | undefined {
+function restoreRootDescriptors(repoPath: string, before: Map<string, RootDescriptorSnapshot>): string[] {
+  const problems: string[] = [];
+  for (const [name, entry] of before) {
+    const candidate = path.join(repoPath, name);
+    if (pathSignature(candidate) === entry.signature) {
+      continue;
+    }
+    try {
+      if (entry.link !== undefined && !(fs.lstatSync(candidate, { throwIfNoEntry: false })?.isSymbolicLink() && fs.readlinkSync(candidate) === entry.link)) {
+        fs.rmSync(candidate, { recursive: true, force: true, maxRetries: 3 });
+        fs.symlinkSync(entry.link, candidate);
+      }
+      const target = entry.target;
+      const writePath = target && (entry.link !== undefined ? target.path : candidate);
+      if (target && writePath && !hasBytes(writePath, target.bytes)) {
+        fs.rmSync(writePath, { recursive: true, force: true, maxRetries: 3 });
+        fs.writeFileSync(writePath, target.bytes, { flag: 'wx' });
+      }
+    } catch (error) {
+      problems.push(`The evaluator could not restore ${name}, which the descriptor script changed: ${errorMessage(error)}`);
+    }
+  }
+  return problems;
+}
+
+function hasBytes(filePath: string, bytes: Buffer): boolean {
   try {
-    const stats = fs.lstatSync(candidatePath);
-    return `${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+    return fs.lstatSync(filePath).isFile() && readBoundedFileBytes(filePath, bytes.length + 1).equals(bytes);
   } catch {
+    return false;
+  }
+}
+
+// Covers the name itself and, through a symlink, the file it points to.
+function pathSignature(candidatePath: string): string | undefined {
+  const signature = (stats: fs.Stats | undefined) => stats ? `${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}` : '';
+  const link = fs.lstatSync(candidatePath, { throwIfNoEntry: false });
+  if (!link) {
     return undefined;
   }
+  let target: fs.Stats | undefined;
+  try {
+    target = fs.statSync(candidatePath);
+  } catch {
+    target = undefined;
+  }
+  return `${signature(link)}|${signature(target)}`;
 }
 
 function pathExists(candidatePath: string): boolean {
