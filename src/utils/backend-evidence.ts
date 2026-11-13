@@ -276,7 +276,15 @@ function detectFramework(kind: BackendRepositoryKind, files: CommittedSourceFile
   const result = (name: BackendFramework, evidence: string[]) => ({ name, evidence });
   // The repository kind's evidence already says why.
   if (kind === 'library') return result('library', []);
-  if (kind === 'edge-module') return result('edge', []);
+
+  const sources = files.filter(file => SOURCE_FILE.test(file.path));
+  const spring = sources.find(file => /^\s*@SpringBootApplication\b/m.test(file.content));
+  const springResult = (path: string) => {
+    const folioSpringBase = files.find(file => /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?)$/.test(file.path) && /folio-spring-base/.test(file.content));
+    return result('spring', [`@SpringBootApplication in ${path}`,
+      folioSpringBase ? `folio-spring-base in ${folioSpringBase.path}` : 'No folio-spring-base dependency found']);
+  };
+  if (kind === 'edge-module') return spring ? springResult(spring.path) : result('edge', []);
 
   const grails = files.find(file => /(?:^|\/)grails-app\//.test(file.path));
   if (grails) return result('grails', [`Grails application folder ${grails.path.replace(/(grails-app)\/.*$/, '$1/')}`]);
@@ -290,13 +298,7 @@ function detectFramework(kind: BackendRepositoryKind, files: CommittedSourceFile
     ]);
   }
 
-  const sources = files.filter(file => SOURCE_FILE.test(file.path));
-  const spring = sources.find(file => /^\s*@SpringBootApplication\b/m.test(file.content));
-  if (spring) {
-    const folioSpringBase = files.find(file => /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?)$/.test(file.path) && /folio-spring-base/.test(file.content));
-    return result('spring', [`@SpringBootApplication in ${spring.path}`,
-      folioSpringBase ? `folio-spring-base in ${folioSpringBase.path}` : 'No folio-spring-base dependency found']);
-  }
+  if (spring) return springResult(spring.path);
 
   const verticle = sources.find(file => /\bextends\s+AbstractVerticle\b/.test(file.content));
   if (verticle) return result('vertx', [`${verticle.path} extends AbstractVerticle`]);
