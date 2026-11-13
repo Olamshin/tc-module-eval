@@ -14,9 +14,11 @@ import { hasMavenProject } from '../parsers/maven-dependency-parser';
 import { findGradleProjectDir, getGradleCommand } from '../parsers/gradle-dependency-parser';
 import { writeFolioNpmrcIfMissing } from '../parsers/npm-dependency-parser';
 import { validateRepoPath } from '../parsers/common';
-import { findCandidateFiles, isWithinRepo, relativePosixPath, walkDirectories } from '../repo-files';
+import { findCandidateFiles, isWithinRepo, readBoundedFileBytes, relativePosixPath, walkDirectories } from '../repo-files';
+import { errorMessage } from '../type-guards';
 
 const DESCRIPTOR_NAME = 'ModuleDescriptor.json';
+const MAX_GENERATED_DESCRIPTOR_BYTES = 8 * 1024 * 1024;
 // Stripes modules usually redirect `stripes mod descriptor` output to module-descriptor.json.
 const FRONTEND_DESCRIPTOR_NAMES = [DESCRIPTOR_NAME, 'module-descriptor.json'];
 export const FRONTEND_DESCRIPTOR_SCRIPTS = ['build-mod-descriptor', 'build-module-descriptor', 'generate-module-descriptor'];
@@ -131,37 +133,14 @@ async function runBuildDescriptorStrategy(
   return selectedArtifact(repoPath, selected, strategy, command, before);
 }
 
-// The install and its .npmrc are removed afterwards, so S003's own production-only install starts from the same checkout.
 async function runFrontendDescriptorStrategy(
   repoPath: string,
   scriptName: string,
   evaluationRun: EvaluationRun | undefined,
   commandRunner: CommandRunner
 ): Promise<ModuleDescriptorArtifact> {
-  const nodeModules = path.join(repoPath, 'node_modules');
-  const hadNodeModules = pathExists(nodeModules);
-  const wroteNpmrc = writeFolioNpmrcIfMissing(repoPath);
-  try {
-    return await generateFrontendDescriptor(repoPath, scriptName, evaluationRun, commandRunner);
-  } finally {
-    if (!hadNodeModules) {
-      fs.rmSync(nodeModules, { recursive: true, force: true });
-    }
-    if (wroteNpmrc) {
-      fs.rmSync(path.join(repoPath, '.npmrc'), { force: true });
-    }
-  }
-}
-
-async function generateFrontendDescriptor(
-  repoPath: string,
-  scriptName: string,
-  evaluationRun: EvaluationRun | undefined,
-  commandRunner: CommandRunner
-): Promise<ModuleDescriptorArtifact> {
-  const before = snapshotRootDescriptors(repoPath);
   // Descriptor scripts call the Stripes CLI, a devDependency, so devDependencies are installed too.
-  const installCommand = await commandRunner.run({
+  const installRequest: CommandExecutionRequest = {
     command: 'yarn',
     args: ['install', '--ignore-scripts', '--ignore-engines', '--pure-lockfile'],
     cwd: repoPath,
@@ -169,7 +148,32 @@ async function generateFrontendDescriptor(
     maxOutputBytes: 64 * 1024,
     requiresIsolation: true,
     networkPolicy: NPM_NETWORK_POLICY
-  }, evaluationRun);
+  };
+  const before = snapshotRootDescriptors(repoPath);
+  const created = [
+    ...(pathExists(path.join(repoPath, 'node_modules')) ? [] : ['node_modules']),
+    ...((commandRunner.canRun?.(installRequest) ?? true) && writeFolioNpmrcIfMissing(repoPath) ? ['.npmrc'] : [])
+  ];
+
+  let result: ModuleDescriptorArtifact | undefined;
+  try {
+    result = await generateFrontendDescriptor(repoPath, scriptName, installRequest, before, evaluationRun, commandRunner);
+    return result;
+  } finally {
+    const leftovers = [...created, ...FRONTEND_DESCRIPTOR_NAMES.filter(name => !before.has(name))];
+    result?.warnings.push(...removeCreatedPaths(repoPath, leftovers));
+  }
+}
+
+async function generateFrontendDescriptor(
+  repoPath: string,
+  scriptName: string,
+  installRequest: CommandExecutionRequest,
+  before: Map<string, string>,
+  evaluationRun: EvaluationRun | undefined,
+  commandRunner: CommandRunner
+): Promise<ModuleDescriptorArtifact> {
+  const installCommand = await commandRunner.run(installRequest, evaluationRun);
   const source = { strategy: 'frontend-script' as const, descriptorScript: scriptName, installCommand };
   if (installCommand.status !== 'success') {
     return commandProblemArtifact(installCommand, source, `Installing the dependencies of the ${scriptName} script`);
@@ -188,20 +192,33 @@ async function generateFrontendDescriptor(
     return commandProblemArtifact(command, { ...source, command }, 'Frontend descriptor generation');
   }
 
-  const written = FRONTEND_DESCRIPTOR_NAMES
+  const selected = FRONTEND_DESCRIPTOR_NAMES
     .map(name => path.join(repoPath, name))
-    .filter(candidate => fs.existsSync(candidate) && isSafeFinalDescriptor(repoPath, candidate));
-  const selected = written.find(candidate => before.get(path.basename(candidate)) !== modifiedTime(candidate)) ?? written[0];
+    .find(candidate => pathSignature(candidate) !== before.get(path.basename(candidate)) && isSafeFinalDescriptor(repoPath, candidate));
   if (!selected) {
     return artifact('missing', {
       ...source,
       command,
-      errors: [`The ${scriptName} script ran, but it did not create ${FRONTEND_DESCRIPTOR_NAMES.join(' or ')} at the repository root.`]
+      errors: [`The ${scriptName} script ran, but it did not write ${FRONTEND_DESCRIPTOR_NAMES.join(' or ')} at the repository root.`]
     });
   }
 
-  if (fs.readFileSync(selected, 'utf-8').trim() === '') {
-    const name = path.basename(selected);
+  const name = path.basename(selected);
+  const produced: ModuleDescriptorArtifact = {
+    ...selectedArtifact(repoPath, selected, 'frontend-script', command, new Set(before.keys())),
+    // A descriptor the script created is removed with the install, so only its content is kept.
+    absolutePath: before.has(name) ? selected : undefined,
+    descriptorScript: scriptName,
+    installCommand
+  };
+  let content: string;
+  try {
+    content = readDescriptorText(selected);
+  } catch (error) {
+    return { ...produced, readError: errorMessage(error) };
+  }
+
+  if (content.trim() === '') {
     return artifact('invalid-candidate', {
       ...source,
       command,
@@ -210,7 +227,30 @@ async function generateFrontendDescriptor(
     });
   }
 
-  return { ...selectedArtifact(repoPath, selected, 'frontend-script', command, new Set(before.keys())), descriptorScript: scriptName, installCommand };
+  return { ...produced, content };
+}
+
+function readDescriptorText(descriptorPath: string): string {
+  if (!fs.statSync(descriptorPath).isFile()) {
+    throw new Error('it is not a regular file');
+  }
+  const bytes = readBoundedFileBytes(descriptorPath, MAX_GENERATED_DESCRIPTOR_BYTES + 1);
+  if (bytes.length > MAX_GENERATED_DESCRIPTOR_BYTES) {
+    throw new Error(`it is larger than ${MAX_GENERATED_DESCRIPTOR_BYTES / (1024 * 1024)} MiB`);
+  }
+  return bytes.toString('utf-8');
+}
+
+function removeCreatedPaths(repoPath: string, names: string[]): string[] {
+  const problems: string[] = [];
+  for (const name of names) {
+    try {
+      fs.rmSync(path.join(repoPath, name), { recursive: true, force: true, maxRetries: 3 });
+    } catch (error) {
+      problems.push(`The evaluator could not remove ${name}, which it created while generating the descriptor: ${errorMessage(error)}`);
+    }
+  }
+  return problems;
 }
 
 function commandProblemArtifact(
@@ -369,28 +409,28 @@ function isDescriptorTemplateName(fileName: string): boolean {
   return /moduledescriptor.*\.json$/i.test(fileName);
 }
 
-function snapshotRootDescriptors(repoPath: string): Map<string, number> {
-  const snapshot = new Map<string, number>();
+function snapshotRootDescriptors(repoPath: string): Map<string, string> {
+  const snapshot = new Map<string, string>();
   for (const name of FRONTEND_DESCRIPTOR_NAMES) {
-    const candidate = path.join(repoPath, name);
-    if (fs.existsSync(candidate) && isSafeFinalDescriptor(repoPath, candidate)) {
-      snapshot.set(name, modifiedTime(candidate));
+    const signature = pathSignature(path.join(repoPath, name));
+    if (signature) {
+      snapshot.set(name, signature);
     }
   }
   return snapshot;
 }
 
-function modifiedTime(candidatePath: string): number {
-  return fs.statSync(candidatePath).mtimeMs;
+function pathSignature(candidatePath: string): string | undefined {
+  try {
+    const stats = fs.lstatSync(candidatePath);
+    return `${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+  } catch {
+    return undefined;
+  }
 }
 
 function pathExists(candidatePath: string): boolean {
-  try {
-    fs.lstatSync(candidatePath);
-    return true;
-  } catch {
-    return false;
-  }
+  return pathSignature(candidatePath) !== undefined;
 }
 
 function relative(repoPath: string, candidatePath: string): string {
@@ -406,6 +446,8 @@ function artifact(
     strategy: values.strategy,
     descriptorPath: values.descriptorPath,
     absolutePath: values.absolutePath,
+    content: values.content,
+    readError: values.readError,
     descriptorScript: values.descriptorScript,
     installCommand: values.installCommand,
     command: values.command,
