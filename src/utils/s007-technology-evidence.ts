@@ -752,8 +752,10 @@ function collectGradleBuildFile(
 
   // Never put two optional whitespace runs next to each other ("\\s*(?:\\(\\s*)?"): on a long run of spaces the
   // engine tries every split between them, which is quadratic in the build file size.
+  // A name inside a string, as in "org.folio:folio-rest-api", must not start a match: the match would consume the
+  // declaration after it before matches outside code are dropped.
   const configurationName =
-    '(?:implementation|api|compileOnly|runtimeOnly|annotationProcessor|classpath'
+    '(?<![\\w.:"\'-])(?:implementation|api|compileOnly|runtimeOnly|annotationProcessor|classpath'
     + '|(?:test|testFixtures|integrationTest)(?:Implementation|Api|CompileOnly|RuntimeOnly|AnnotationProcessor))';
   const configuration = `${configurationName}(?:\\s*\\()?\\s*`;
   // Every pattern below starts with the configuration name.
