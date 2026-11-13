@@ -37,13 +37,18 @@ const S006_SKIPPED_DIRECTORY_REASONS: ReadonlyMap<string, S006SkippedFile['reaso
   ['reports', 'generated-artifact'],
   ['report', 'generated-artifact'],
   ['evaluation-reports', 'generated-artifact'],
+  ['evaluation-report', 'generated-artifact'],
   ['generated-reports', 'generated-artifact'],
+  ['generated-report', 'generated-artifact'],
   ['html-report', 'generated-artifact'],
   ['test-results', 'generated-artifact'],
+  ['test-result', 'generated-artifact'],
   ['generated', 'generated-artifact'],
   ['gen', 'generated-artifact']
 ]);
-const S006_VCS_DIRECTORIES: ReadonlySet<string> = new Set(['.git', '.hg', '.svn']);
+const S006_SKIPPED_AT_ANY_DEPTH: ReadonlySet<string> = new Set([
+  '.git', '.hg', '.svn', 'evaluation-reports', 'evaluation-report', 'generated-reports', 'generated-report', 'html-report', 'test-results', 'test-result'
+]);
 const S006_SUPPORTED_TEXT_FILE_PATTERN =
   /\.(?:bash|cjs|cfg|conf|crt|env|gradle|groovy|ini|java|js|json|jsx|key|kt|kts|md|mjs|pem|properties|py|rb|sh|sql|tf|tfvars|toml|ts|tsx|txt|xml|yaml|yml|zsh)$/i;
 const S006_SUPPORTED_SPECIAL_FILE_PATTERN =
@@ -334,9 +339,8 @@ function collectBoundedS006EvidenceCandidates(repoPath: string, options: S006Rep
 
     const directoryName = path.basename(currentPath);
     const skippedReason = S006_SKIPPED_DIRECTORY_REASONS.get(directoryName);
-    // Build output is written at the root of the repository or of a module; elsewhere a folder such as src/reports is source.
     const skipped = skippedReason && currentPath !== repoPath
-      && (skippedReason !== 'generated-artifact' || S006_VCS_DIRECTORIES.has(directoryName) || isBuildModuleRoot(repoPath, path.dirname(currentPath)));
+      && (skippedReason !== 'generated-artifact' || S006_SKIPPED_AT_ANY_DEPTH.has(directoryName) || isBuildModuleRoot(repoPath, path.dirname(currentPath)));
     if (skippedReason && skipped) {
       pushS006SkippedFile(skippedFiles, {
         path: relativePath,

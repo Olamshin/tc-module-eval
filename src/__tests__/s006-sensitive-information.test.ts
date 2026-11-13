@@ -410,6 +410,9 @@ describe('S006 bounded repository candidate scanning', () => {
     writeRepoFile(repoPath, 'service/build.gradle', 'plugins {}\n');
     writeRepoFile(repoPath, 'service/build/resources/main/application.yml', 'ignored: true\n');
     writeRepoFile(repoPath, 'src/node_modules/pkg/index.js', 'ignored();\n');
+    writeRepoFile(repoPath, 'src/e2e/test-result/run.json', '{}\n');
+    writeRepoFile(repoPath, 'src/e2e/evaluation-report/run.json', '{}\n');
+    writeRepoFile(repoPath, 'src/e2e/generated-report/run.json', '{}\n');
 
     const result = scanS006RepositoryCandidates(repoPath);
 
@@ -419,6 +422,9 @@ describe('S006 bounded repository candidate scanning', () => {
     expect(result.coverage.skippedFiles.map(file => [file.path, file.reason])).toEqual([
       ['reports', 'generated-artifact'],
       ['service/build', 'generated-artifact'],
+      ['src/e2e/evaluation-report', 'generated-artifact'],
+      ['src/e2e/generated-report', 'generated-artifact'],
+      ['src/e2e/test-result', 'generated-artifact'],
       ['src/node_modules', 'dependency-directory']
     ]);
   });
