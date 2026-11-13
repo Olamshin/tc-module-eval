@@ -345,9 +345,66 @@ describe('module-descriptor-artifact', () => {
 
       expect(result.status).toBe('produced');
       expect(result.descriptorPath).toBe('ModuleDescriptor.json');
-      expect(result.absolutePath).toBe(descriptor);
+      expect(result.absolutePath).toBeUndefined();
       expect(result.content).toBe(JSON.stringify({ id: 'folio_example-1.0.0' }));
       expect(result.warnings).toEqual([]);
+      expect(fs.readFileSync(descriptor, 'utf-8')).toBe(JSON.stringify({ id: 'folio_old-0.1.0' }));
+    });
+
+    it('should restore the exact bytes of a committed descriptor the script truncated', async () => {
+      const repo = stripesRepo();
+      const descriptor = path.join(repo, 'module-descriptor.json');
+      const committed = Buffer.from('{\n  "id": "folio_example-0.9.0"\n}\n');
+      fs.writeFileSync(descriptor, committed);
+      const runner = scriptRunner(repo, () => fs.writeFileSync(descriptor, ''));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('invalid-candidate');
+      expect(result.warnings).toEqual([]);
+      expect(fs.readFileSync(descriptor).equals(committed)).toBe(true);
+      expect(fs.readdirSync(repo).sort()).toEqual(['module-descriptor.json', 'package.json']);
+    });
+
+    it('should notice a write through a committed in-repository symlink and restore its target', async () => {
+      const repo = stripesRepo();
+      fs.mkdirSync(path.join(repo, 'descriptors'));
+      const target = path.join(repo, 'descriptors', 'generated.json');
+      const committed = Buffer.from(JSON.stringify({ id: 'folio_example-0.9.0' }));
+      fs.writeFileSync(target, committed);
+      fs.symlinkSync(path.join('descriptors', 'generated.json'), path.join(repo, 'module-descriptor.json'));
+      const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_example-1.0.0' })));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('produced');
+      expect(result.descriptorPath).toBe('module-descriptor.json');
+      expect(result.content).toBe(JSON.stringify({ id: 'folio_example-1.0.0' }));
+      expect(fs.readlinkSync(path.join(repo, 'module-descriptor.json'))).toBe(path.join('descriptors', 'generated.json'));
+      expect(fs.readFileSync(target).equals(committed)).toBe(true);
+    });
+
+    it('should need manual review when .npmrc cannot be written', async () => {
+      const repo = stripesRepo();
+      const realFs: typeof fs = jest.requireActual('fs');
+      const writeFileSync = realFs.writeFileSync;
+      const spy = jest.spyOn(realFs, 'writeFileSync').mockImplementation((target, data, options) => {
+        if (path.basename(String(target)) === '.npmrc') {
+          throw Object.assign(new Error('EACCES: permission denied, open \'.npmrc\''), { code: 'EACCES' });
+        }
+        writeFileSync(target, data, options);
+      });
+      const runner = scriptRunner(repo, () => undefined);
+
+      try {
+        const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+        expect(runner.calls).toEqual([]);
+        expect(result.status).toBe('unsafe-to-run');
+        expect(result.errors).toEqual(['The evaluator could not write the .npmrc the dependency install needs: EACCES: permission denied, open \'.npmrc\'']);
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('should not use a committed descriptor when the script wrote nothing', async () => {

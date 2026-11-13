@@ -122,7 +122,7 @@ export interface ModuleDescriptorArtifact {
     | 'command-failed';
   strategy?: 'maven-generation' | 'gradle-generation' | 'frontend-script' | 'static-root';
   descriptorPath?: string;
-  /** Absent when the file was generated and has since been removed; `content` or `readError` then holds what was read. */
+  /** Absent for the frontend-script strategy, which removes or restores its output; `content` or `readError` holds what was read. */
   absolutePath?: string;
   content?: string;
   readError?: string;
