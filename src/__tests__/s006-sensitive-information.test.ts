@@ -795,7 +795,7 @@ describe('S006 sensitive information finding extraction', () => {
       [
         'spring:',
         '  datasource:',
-        '    password: ${DB_PASSWORD:folio_admin}',
+        '    password: ${DB_PASSWORD:}',
         '  kafka:',
         '    ssl:',
         '      key-store-password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}',
@@ -810,6 +810,33 @@ describe('S006 sensitive information finding extraction', () => {
     const result = await analyzeRepo(repoPath);
 
     expect(result.findings.filter(finding => finding.detectorId === 'password-secret-assignment')).toEqual([]);
+  });
+
+  it('reviews the default of a property reference, which the application uses when the variable is not set', async () => {
+    repoPath = createTempRepo();
+    writeRepoFile(
+      repoPath,
+      'src/main/resources/application.yml',
+      [
+        'spring:',
+        '  datasource:',
+        '    password: ${DB_PASSWORD:folio_admin}',
+        'kafka:',
+        '  password: ${KAFKA_PASSWORD:s3cr3t}',
+        '  token: ${KAFKA_TOKEN:-Zq8vT2mKp4LxW9nR}',
+        '  secret: ${KAFKA_SECRET:}',
+        '  api-key: ${KAFKA_API_KEY}'
+      ].join('\n')
+    );
+
+    const result = await analyzeRepo(repoPath);
+
+    expect(result.findings.filter(finding => finding.detectorId === 'password-secret-assignment')
+      .map(finding => [finding.line, finding.valueClassification, finding.statusImpact])).toEqual([
+      [3, 'live-looking', 'manual_review'],
+      [5, 'synthetic', 'manual_review'],
+      [6, 'live-looking', 'manual_review']
+    ]);
   });
 
   it('retains bearer token assignments as matched excerpts', async () => {

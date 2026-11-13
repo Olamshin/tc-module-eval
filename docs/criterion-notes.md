@@ -86,7 +86,7 @@ Gitleaks runs with its default rules and `--ignore-gitleaks-allow`, so a `.gitle
 - comparisons (`==`, `===`) and arrow functions (`=>`);
 - unquoted values in program source (Java, Kotlin, Groovy, Gradle, JavaScript, TypeScript, Python, Ruby, and Jenkinsfiles), which are code rather than committed values, unless they sit inside a string literal (including a multiline one) such as a JDBC URL;
 - an unquoted `${VAR}` reference followed by a command in a shell script or Dockerfile, as in `PGPASSWORD=${DB_PASSWORD} psql …`;
-- `%s`, `%d`, `{}`, and `{NAME}` placeholders (such as `{VAULT_TOKEN}`), `$NAME` references, and empty lists (`accessToken: []`);
+- `%s`, `%d`, `{}`, and `{NAME}` placeholders (such as `{VAULT_TOKEN}`), `$NAME` references, `${NAME}` references without a default or with an empty one (`${DB_PASSWORD:}`), and empty lists (`accessToken: []`). A `${NAME:default}` or `${NAME:-default}` reference is checked by its default, which the application uses when `NAME` is not set, so `${DB_PASSWORD:folio_admin}` needs review;
 - header names: a standard or Okapi header name such as `X-Okapi-Token` or `Authorization`, or any header name held by a constant named as a header (ending in `HEADER` or `HEADER_NAME`), such as `OKAPI_TOKEN_HEADER = 'X-Okapi-Tenant-Id'`.
 
 Java `import` and `import static` lines, identifiers such as `Constants.LOCAL_ERROR`, and public FOLIO hosts (`folio.org` and its subdomains, such as `okapi.ci.folio.org`) are never reported as host names. Localhost URLs in helper scripts are not reported.
