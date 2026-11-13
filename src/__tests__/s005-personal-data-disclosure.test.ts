@@ -465,17 +465,17 @@ const userBarcode = patron.barcode;
     fs.rmSync(repoPath, { recursive: true, force: true });
   });
 
-  it('keeps a JDWP debug address context-only and does not count the loan-types interface as a loan', () => {
+  it('ignores the address in a JDWP debugger option but not other address evidence on its line, and does not count the loan-types interface as a loan', () => {
     const repoPath = createTempRepo();
     writeRepoFile(repoPath, 'ramls/loan-type.raml', '/loan-types:\n  /{loantypeId}:\n/loan-storage/loans:\n');
     writeRepoFile(repoPath, 'src/main/resources/application.yml', 'java-options: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005\nlegacy-options: -Xrunjdwp:transport=dt_socket,server=y,address=5005\n');
+    writeRepoFile(repoPath, 'src/main/java/Debug.java', 'String address = patron.address; // -agentlib:jdwp=transport=dt_socket,address=5005\n');
 
     const result = gatherS005PersonalDataEvidence(repoPath);
     expect(result.signals.filter(signal => ['address', 'circulation_transactions'].includes(signal.category))
       .map(signal => [signal.path, signal.line, signal.category, signal.strength])).toEqual([
       ['ramls/loan-type.raml', 3, 'circulation_transactions', 'strong'],
-      ['src/main/resources/application.yml', 1, 'address', 'context'],
-      ['src/main/resources/application.yml', 2, 'address', 'context']
+      ['src/main/java/Debug.java', 1, 'address', 'strong']
     ]);
     fs.rmSync(repoPath, { recursive: true, force: true });
   });
