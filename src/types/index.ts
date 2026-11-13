@@ -121,6 +121,10 @@ export interface ModuleDescriptorArtifact {
   strategy?: 'maven-generation' | 'gradle-generation' | 'frontend-script' | 'static-root';
   descriptorPath?: string;
   absolutePath?: string;
+  /** The package.json script that generates the descriptor, for the frontend-script strategy. */
+  descriptorScript?: string;
+  /** The dependency install the descriptor script needs; when it did not succeed, `command` is absent. */
+  installCommand?: CommandExecutionResult;
   command?: CommandExecutionResult;
   warnings: string[];
   errors: string[];

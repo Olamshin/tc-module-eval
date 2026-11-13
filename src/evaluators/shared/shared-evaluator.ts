@@ -97,6 +97,16 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
 
   private async evaluateS002(repoPath: string, evaluationRun?: EvaluationRun): Promise<CriterionResult> {
     const run = this.runFor(repoPath, 'S002', evaluationRun);
+    const moduleKind = await getModuleKind(run, repoPath);
+    if (moduleKind.kind === 'library') {
+      return {
+        criterionId: 'S002',
+        status: EvaluationStatus.NOT_APPLICABLE,
+        evidence: 'S002 does not apply to explicit FOLIO library repositories',
+        details: this.formatModuleKindDetails('Nothing; S002 does not apply to FOLIO libraries.', moduleKind)
+      };
+    }
+
     const artifact = await run.getOrCreateArtifact('moduleDescriptor', () => produceModuleDescriptorArtifact(repoPath, run));
 
     if (artifact.status !== 'produced' && artifact.status !== 'discovered') {
