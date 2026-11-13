@@ -1,4 +1,5 @@
 import { SectionEvaluator, CriterionResult, EvaluationStatus, CriterionFunction, EvaluationRun } from '../../types';
+import { runCriteriaInOrder } from '../../utils/criterion-scheduling';
 import { redactEvaluatorSecrets } from '../../utils/redaction';
 import { errorMessage } from '../../utils/type-guards';
 
@@ -17,23 +18,14 @@ export abstract class BaseSectionEvaluator implements SectionEvaluator {
   }
 
   async evaluate(repoPath: string, criteriaFilter?: string[], evaluationRun?: EvaluationRun): Promise<CriterionResult[]> {
-    const results: Promise<CriterionResult>[] = [];
-
     const criteriaToEvaluate = criteriaFilter
       ? this.criteriaIds.filter(id => criteriaFilter.includes(id))
       : this.criteriaIds;
 
-    // Criteria run one at a time and in order, except that a criterion waiting on its agent review lets
-    // the next one start: reviews overlap (the run bounds how many), while deterministic work stays sequential.
-    for (const criterionId of criteriaToEvaluate) {
-      const handoff = evaluationRun?.nextAgentReviewHandoff();
-      const result = this.evaluateCriterion(criterionId, repoPath, evaluationRun)
-        .catch(error => this.createErrorResult(criterionId, error));
-      results.push(result);
-      await (handoff ? Promise.race([result, handoff]) : result);
-    }
-
-    return Promise.all(results);
+    return runCriteriaInOrder(criteriaToEvaluate.map(criterionId => () =>
+      this.evaluateCriterion(criterionId, repoPath, evaluationRun)
+        .catch(error => this.createErrorResult(criterionId, error))
+    ), evaluationRun);
   }
 
   async evaluateCriterion(criterionId: string, repoPath: string, evaluationRun?: EvaluationRun): Promise<CriterionResult> {
