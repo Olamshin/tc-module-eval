@@ -39,6 +39,10 @@ const COLLECTIONS: Array<{ id: B009FrameworkId; displayName: string; path: RegEx
   { id: 'bruno', displayName: 'Bruno', path: /(?:^|\/)bruno\.json$|\.bru$/i },
   { id: 'insomnia', displayName: 'Insomnia', path: /(?:^|\/)\.insomnia\/|(?:^|\/)insomnia[^/]*\.(?:json|ya?ml)$/i }
 ];
+const POSTMAN_NAME = COLLECTIONS[0].path;
+const POSTMAN_FOLDER = /(?:^|\/)(?:postman|collections)\//i;
+const POSTMAN_SCHEMA = /^https?:\/\/schema\.(?:get)?postman\.com\/json\/collection\//i;
+const isPostmanCandidate = (path: string) => /\.json$/i.test(path) && POSTMAN_FOLDER.test(path) && !POSTMAN_NAME.test(path);
 
 export interface B009Inputs {
   kind: BackendRepositoryKind;
@@ -55,7 +59,7 @@ export async function analyzeB009(repoPath: string, run: EvaluationRun): Promise
   const inputs: B009Inputs = { kind, remoteLookups: Boolean(run.remoteLookups), remoteEvidence: [] };
   if (kind === 'library') return evaluateB009(inputs);
   [inputs.snapshot, inputs.policyLoad] = await Promise.all([readCommittedSource(repoPath, {
-    include: path => FEATURE.test(path),
+    include: path => FEATURE.test(path) || isPostmanCandidate(path),
     list: path => KARATE_CONFIG.test(path) || COLLECTIONS.some(rule => rule.path.test(path)),
     maxTreeBytes: 16 * 1024 * 1024,
     maxEntries: 50_000,
@@ -230,8 +234,23 @@ function repositorySuites(snapshot: CommittedSourceSnapshot | undefined, policy:
   return [
     ...suite('karate', 'Karate', karate.map(file => file.path), configFile && karate.length ? { configFile } : {}),
     ...suite('feature-files', 'Gherkin', other.map(file => file.path)),
-    ...COLLECTIONS.flatMap(rule => suite(rule.id, rule.displayName, listed.filter(path => rule.path.test(path))))
+    ...COLLECTIONS.flatMap(rule => suite(rule.id, rule.displayName, listed.filter(path => rule.path.test(path))
+      .concat(rule.id === 'postman' ? postmanCollections(snapshot.files) : []).sort()))
   ];
+}
+
+function postmanCollections(files: CommittedSourceSnapshot['files']): string[] {
+  return files.filter(file => isPostmanCandidate(file.path) && POSTMAN_SCHEMA.test(postmanSchema(file.content))).map(file => file.path);
+}
+
+function postmanSchema(content: string): string {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    const info = isRecord(parsed) ? parsed.info : undefined;
+    return isRecord(info) && typeof info.schema === 'string' ? info.schema : '';
+  } catch {
+    return '';
+  }
 }
 
 function integrationTestSuites(lookup: B009IntegrationTestsLookup | undefined, policy: KaratePolicy): B009Suite[] {
