@@ -7,9 +7,11 @@ import {
 } from '../types';
 import { CriterionAgentReviewRequest, DISCOVERED_TECHNOLOGY_ID, runCriterionAgentReview, unavailableResult } from './criterion-agent-review';
 import { redactEvaluatorSecrets } from './redaction';
+import { S010_LIBRARY_SOURCES_ROOT, S010LibrarySourceFiles } from './s010-library-sources';
 import { errorMessage } from './type-guards';
 
 const SUMMARY_PATH = '.criterion-agent/S010/deterministic-summary.json';
+const LIBRARY_INDEX_PATH = '.criterion-agent/S010/library-sources.json';
 const SUMMARY_BYTES = 48 * 1024;
 const MAX_SUMMARY_REFERENCES = 5;
 // UI modules can list dozens of interfaces; the agent assesses them as one dependency.
@@ -32,11 +34,12 @@ export async function reviewS010WithAgent(
   repoPath: string,
   analysis: S010Analysis,
   config: CriterionAgentReviewConfig | undefined,
-  commandRunner?: CommandRunner
+  commandRunner?: CommandRunner,
+  librarySources?: S010LibrarySourceFiles
 ): Promise<CriterionAgentReviewResult> {
   let request: CriterionAgentReviewRequest;
   try {
-    request = await buildS010AgentReviewRequest(repoPath, analysis);
+    request = await buildS010AgentReviewRequest(repoPath, analysis, librarySources);
   } catch (error) {
     return unavailable(`Unable to prepare S010 agent review material: ${errorMessage(error)}`);
   }
@@ -48,10 +51,13 @@ export async function reviewS010WithAgent(
 
 export async function buildS010AgentReviewRequest(
   repoPath: string,
-  analysis: S010Analysis
+  analysis: S010Analysis,
+  librarySources?: S010LibrarySourceFiles
 ): Promise<CriterionAgentReviewRequest> {
   const summary = deterministicSummary(analysis);
   const candidates = candidateIds(analysis);
+  const libraries = librarySources?.sources.libraries ?? [];
+  const libraryFiles = librarySources?.files ?? [];
   return {
     criterionId: 'S010',
     repositoryPath: repoPath,
@@ -67,6 +73,10 @@ export async function buildS010AgentReviewRequest(
       'Distinguish process startup, tenant initialization, and runtime operations, and distinguish liveness from readiness. Do not infer process startup failure from tenant-init failure or require readiness to remain UP during a required-service outage. Assess actual failure bounds, diagnostics, readiness semantics, and recovery behavior; indefinite hangs, misleading readiness, uncontrolled resource consumption, or data corruption are concerns only when supported by evidence. An exception or connect timeout alone does not prove the whole failure path is bounded.',
       'Optional dependencies may use feature isolation or controlled module-wide degradation, but their absence must not make the module unready. Appropriate bounded failure handling is required; no single timeout or retry mechanism is universally required.',
       'Do not claim a proven end-to-end failure bound from assumed Hikari, Liquibase, Kafka, or HTTP-client defaults. Cite the effective bound and its connection to the complete operation, including retries; if the relevant library behavior is outside the snapshot, leave the bound unverified in both the finding and the executive summary.',
+      'A library the module depends on, such as folio-spring-base or RMB, can read environment variables and configure datasources, connection pools, Liquibase, Kafka, and HTTP clients without any reference in repository code. Never conclude that a setting or environment variable is unused, or that a library default applies, because repository code does not mention it.',
+      ...(libraryFiles.length ? [
+        `${S010_LIBRARY_SOURCES_ROOT}/ is not part of the repository: it holds the released source of the FOLIO libraries the module declares, at the versions its build files set, and ${LIBRARY_INDEX_PATH} lists each library, its folder, and the libraries whose source is absent or incomplete (omittedFileCount). Search it before stating what such a library does or does not do, and connect what it does to this module through the build file, configuration, or code that brings it in. Cite a library file only alongside a repository file, never instead of one. For a library without source, its behavior stays unverified, and so does the absence of something in a library with omitted files.`
+      ] : []),
       'Missing required configuration with no sensible default may satisfy S010 through clear startup fail-fast. Explicit continuation or deferred failure is a concern. Absence of visible handling alone is an evidence gap, not proof of failure.',
       'Tests strengthen evidence but are not mandatory. General Node.js behavior is outside deterministic phase-one support and needs reviewer judgment.',
       'This review is advisory only. Do not change, approve, pass, fail, or override the deterministic S010 status.',
@@ -85,8 +95,23 @@ export async function buildS010AgentReviewRequest(
       'Every evidenceReferences value must exactly match a repoRelativePath listed in repository-files.json (without the docs/ workspace prefix). Do not cite a path merely because deterministic-summary.json mentions it.',
       'Return only one JSON object with recommendation, confidence, summary, rationale, evidenceReferences, assessments (including failureBounds), and reviewerActions.'
     ].join('\n'),
+    ...(libraryFiles.length ? {
+      prepareAdditionalFiles: (availableSourcePaths: ReadonlySet<string>) => {
+        if ([...availableSourcePaths].some(sourcePath => sourcePath.startsWith(`${S010_LIBRARY_SOURCES_ROOT}/`))) {
+          throw new Error(`the repository has its own ${S010_LIBRARY_SOURCES_ROOT} folder, so FOLIO library source cannot be added beside it`);
+        }
+        return libraryFiles;
+      }
+    } : {}),
     files: [
       { repoRelativePath: SUMMARY_PATH, content: summary },
+      ...(libraries.length ? [{ repoRelativePath: LIBRARY_INDEX_PATH, content: JSON.stringify({
+        libraries: libraries.map(({ coordinate, version, sourcePath, root, fileCount, omittedFileCount, problem }) => ({
+          coordinate, version, declaredIn: sourcePath,
+          ...(root ? { folder: root, fileCount, ...(omittedFileCount ? { omittedFileCount } : {}) } : { sourceAbsent: problem })
+        })),
+        ...(librarySources?.sources.notReadReason ? { sourceAbsent: librarySources.sources.notReadReason } : {})
+      }, null, 2) }] : []),
       { repoRelativePath: '.criterion-agent/S010/candidate-dependencies.json', content: JSON.stringify({
         candidateDependencyIds: [...candidates]
       }) },

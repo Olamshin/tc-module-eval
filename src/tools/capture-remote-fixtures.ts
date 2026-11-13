@@ -1,15 +1,18 @@
 #!/usr/bin/env node
-// Maintainer tool: records the remote responses S014, S011 and B009 read so tests replay them without the network.
+// Maintainer tool: records the remote responses S014, S011, B009 and S010 read so tests replay them without the network.
 // Never run in CI. Usage:
 //   yarn capture:remote-fixtures [--platform-ref snapshot]
 //   yarn capture:remote-fixtures --integration-tests mod-users mod-agreements ...
 //   yarn capture:remote-fixtures --sonar /path/to/mod-users /path/to/mod-agreements ... [--no-trim]
+//   yarn capture:remote-fixtures --library-sources /path/to/mod-tags ...
 //   yarn capture:remote-fixtures --retrim src/__tests__/fixtures/remote/sonarcloud-mod-users.json ...
 // --sonar takes local checkouts: S011 runs on each at its HEAD, so the rule-name lookup for its suppressions is
 // recorded too; each becomes sonarcloud-<repository>.json, its bodies trimmed to the fields the evaluator reads
 // (see sonarcloud-fixture-trim.ts) unless --no-trim is given. --retrim trims recorded fixtures again in place.
 // --integration-tests records the folio-integration-tests listing and the trees of the named modules' folders as B009
 // reads them, keeping only the entry fields B009 reads, in folio-integration-tests.json.
+// --library-sources takes local checkouts and records the FOLIO library sources jars S010's agent review reads for
+// them, base64-encoded, in folio-library-sources.json.
 import fs from 'fs-extra';
 import path from 'path';
 import { Command } from 'commander';
@@ -20,6 +23,8 @@ import { analyzeS011 } from '../utils/s011-evaluator';
 import { lookUpIntegrationTests } from '../utils/b009-api-tests';
 import { trimSonarCloudResponses } from './sonarcloud-fixture-trim';
 import { collectPlatformSnapshot, DEFAULT_PLATFORM_REF } from '../utils/s014-application-assignment';
+import { readRepositorySnapshot } from '../utils/agent-review-repository';
+import { collectS010LibrarySources } from '../utils/s010-library-sources';
 import { errorMessage } from '../utils/type-guards';
 
 export const REMOTE_FIXTURE_DIR = path.join(__dirname, '..', '__tests__', 'fixtures', 'remote');
@@ -27,13 +32,17 @@ export const REMOTE_FIXTURE_DIR = path.join(__dirname, '..', '__tests__', 'fixtu
 export interface RemoteFixture {
   capturedAt: string;
   description: string;
-  responses: Record<string, { status: number; body: unknown }>;
+  responses: Record<string, { status: number; body: unknown; bodyBase64?: string }>;
 }
 
 function recordingTransport(): { transport: RemoteEvidenceTransport; responses: RemoteFixture['responses'] } {
   const responses: RemoteFixture['responses'] = {};
   const recordingFetch: typeof fetch = async (input, init) => {
     const response = await fetch(input, init);
+    if (/java-archive|octet-stream|zip/.test(response.headers.get('content-type') ?? '')) {
+      responses[String(input)] = { status: response.status, body: undefined, bodyBase64: Buffer.from(await response.clone().arrayBuffer()).toString('base64') };
+      return response;
+    }
     const text = await response.clone().text();
     let body: unknown = text;
     try { body = JSON.parse(text); } catch { /* recorded as text */ }
@@ -99,6 +108,18 @@ async function captureIntegrationTests(modules: string[], output: string): Promi
   await writeFixture(output, `folio-org/folio-integration-tests as B009 reads it: the top-level listing (${head} entries) and the folder trees, looked up for ${modules.join(', ')}, with only the entry fields B009 reads`, responses);
 }
 
+async function captureLibrarySources(checkouts: string[], output: string): Promise<void> {
+  const { transport, responses } = recordingTransport();
+  const names: string[] = [];
+  for (const checkout of checkouts) {
+    const name = path.basename(path.resolve(checkout));
+    const { sources } = await collectS010LibrarySources(await readRepositorySnapshot(checkout), transport);
+    console.log(`${name}: ${sources.libraries.map(library => `${library.coordinate} ${library.version ?? '?'} ${library.root ? 'read' : library.problem}`).join('; ')}`);
+    names.push(name);
+  }
+  await writeFixture(output, `FOLIO library sources jars as S010's agent review reads them for ${names.join(', ')}`, responses);
+}
+
 async function capture(platformRef: string, output: string): Promise<void> {
   const { transport, responses } = recordingTransport();
   const snapshot = await collectPlatformSnapshot(transport, platformRef);
@@ -119,7 +140,9 @@ if (require.main === module) {
     .option('--no-trim', 'with --sonar, keep whole response bodies')
     .option('--retrim <fixture...>', 'trim recorded SonarCloud fixtures again, in place')
     .option('--integration-tests <module...>', 'record folio-integration-tests as B009 reads it for these module names instead of the platform')
+    .option('--library-sources <checkout...>', 'record the FOLIO library sources jars S010 reads for these local module checkouts instead of the platform')
     .action(async options => options.retrim ? retrim(options.retrim)
+      : options.librarySources ? captureLibrarySources(options.librarySources, path.join(REMOTE_FIXTURE_DIR, 'folio-library-sources.json'))
       : options.integrationTests ? captureIntegrationTests(options.integrationTests, path.join(REMOTE_FIXTURE_DIR, 'folio-integration-tests.json'))
       : options.sonar ? captureSonar(options.sonar, REMOTE_FIXTURE_DIR, options.trim)
         : capture(options.platformRef, options.output));

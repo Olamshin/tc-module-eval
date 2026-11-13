@@ -2,7 +2,7 @@ import type { CriterionAgentReviewRequest, PreparedCriterionAgentReviewRequest }
 import { CommittedSourceSnapshot, readCommittedSource } from './committed-source';
 
 const MAX_FILES = 50_000;
-const MAX_FILE_BYTES = 1024 * 1024;
+export const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 const EXCLUDED_PATTERN = /(?:^|\/)(?:node_modules|vendor|dist|target|build|coverage|\.git|\.idea|\.vscode|\.opencode|\.claude|\.agents|\.criterion-agent)(?:\/|$)|(?:^|\/)(?:\.env(?:\.[^/]*)?|AGENTS\.md|CLAUDE\.md|CONTEXT\.md|\.(?:ignore|rgignore|gitignore)|opencode\.jsonc?)$/i;
 

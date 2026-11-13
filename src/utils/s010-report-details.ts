@@ -7,10 +7,12 @@ import {
   S010Coverage,
   S010Diagnostic,
   S010Finding,
+  S010LibrarySources,
   S010RuntimeKind,
   S010SourceReference
 } from '../types';
 import { renderAgentReviewLines } from './agent-review-report';
+import { sourceLine } from './remote-evidence';
 import { reportPath, reportText } from './report-text';
 import { S010_SOURCE_LIMITS } from './s010-evidence';
 
@@ -84,7 +86,24 @@ export function renderS010HumanDetails(
   } else if (analysis.agentReviewUnavailableReason) {
     lines.push('Agent review:', `  - Not applied: ${reportText(analysis.agentReviewUnavailableReason)}`);
   }
+  if (analysis.agentReviewLibrarySources) lines.push(...librarySourceLines(analysis.agentReviewLibrarySources));
   return lines.join('\n');
+}
+
+function librarySourceLines(sources: S010LibrarySources): string[] {
+  const lines = ['FOLIO library source prepared for the agent review:'];
+  if (sources.notReadReason) lines.push(`  - None: ${reportText(sources.notReadReason)}`);
+  for (const library of sources.libraries) {
+    const name = `${reportText(library.coordinate)}${library.version ? ` ${reportText(library.version)}` : ''} (declared in ${reportPath(library.sourcePath)})`;
+    if (library.root) {
+      lines.push(`  - ${name}: ${library.fileCount} files in ${reportPath(library.root)}${library.omittedFileCount
+        ? `; ${library.omittedFileCount} more left out by a limit or an unsafe entry, so this source is incomplete` : ''}`);
+    }
+    else if (library.problem) lines.push(`  - ${name}: not read; ${reportText(library.problem)}`);
+  }
+  const records = sources.libraries.flatMap(library => library.record ? [library.record] : []);
+  if (records.length) lines.push('Library source downloads:', ...records.map(sourceLine));
+  return lines;
 }
 
 function whatToDo(analysis: S010Analysis): string {

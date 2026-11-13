@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { RemoteEvidenceTransport } from '../../utils/remote-evidence';
 
-export type RecordedResponses = Record<string, { status: number; body: unknown }>;
+export type RecordedResponses = Record<string, { status: number; body?: unknown; bodyBase64?: string }>;
 
 /** Responses recorded by `yarn capture:remote-fixtures` (see src/tools/capture-remote-fixtures.ts). */
 export function loadRemoteFixture(name: string): RecordedResponses {
@@ -23,6 +23,9 @@ export function replayTransport(responses: RecordedResponses): { transport: Remo
     if (!recorded) {
       unrecorded.push(url);
       throw new Error(`No recorded response for ${url}`);
+    }
+    if (recorded.bodyBase64 !== undefined) {
+      return new Response(Buffer.from(recorded.bodyBase64, 'base64'), { status: recorded.status, headers: { 'content-type': 'application/java-archive' } });
     }
     const body = typeof recorded.body === 'string' ? recorded.body : JSON.stringify(recorded.body);
     return new Response(body, { status: recorded.status, headers: { 'content-type': 'application/json' } });

@@ -36,9 +36,16 @@ export type RemoteJsonResult =
   | { ok: true; json: unknown; record: RemoteEvidenceRecord }
   | { ok: false; reason: RemoteFailureReason; status?: number; record: RemoteEvidenceRecord };
 
+export type RemoteBytesResult =
+  | { ok: true; bytes: Buffer; record: RemoteEvidenceRecord }
+  | { ok: false; reason: RemoteFailureReason; status?: number; record: RemoteEvidenceRecord };
+
 /** The bounded, read-only transport every remote lookup goes through (see src/utils/remote-evidence.ts). */
 export interface RemoteLookups {
   getJson(url: string): Promise<RemoteJsonResult>;
+  getBytes(url: string): Promise<RemoteBytesResult>;
+  /** A transport with the same fetch and credentials but its own budgets and records, so its reads cannot use up this one's. */
+  withLimits(limits: Partial<{ maxRequests: number; maxTotalBytes: number; maxDurationMs: number }>): RemoteLookups;
   /** Every request made in this evaluation, in the order they were started. */
   readonly records: readonly RemoteEvidenceRecord[];
 }

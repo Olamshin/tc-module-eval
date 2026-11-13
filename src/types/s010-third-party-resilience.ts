@@ -62,4 +62,28 @@ export interface S010Analysis {
   findings: S010Finding[];
   diagnostics: S010Diagnostic[];
   agentReviewUnavailableReason?: string;
+  /** The FOLIO library source prepared for the agent review; absent when the review was not attempted or the module declares no FOLIO library. */
+  agentReviewLibrarySources?: S010LibrarySources;
+}
+
+export interface S010LibrarySources {
+  /** Why no library source was read at all, such as remote lookups being off. */
+  notReadReason?: string;
+  libraries: S010LibrarySource[];
+}
+
+/** A FOLIO library the module depends on, and whether its released source was read for the agent review. */
+export interface S010LibrarySource {
+  coordinate: string;
+  version?: string;
+  /** The build file that declares the dependency. */
+  sourcePath: string;
+  /** Where its files are in the review workspace and citations, when read. */
+  root?: string;
+  fileCount?: number;
+  /** Text files of the jar left out by a limit or an unsafe entry; its source is then incomplete. */
+  omittedFileCount?: number;
+  /** Why its source was not read. */
+  problem?: string;
+  record?: import('./remote-evidence').RemoteEvidenceRecord;
 }

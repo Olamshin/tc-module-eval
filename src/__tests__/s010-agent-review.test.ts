@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { CriterionAgentReviewConfig, EvaluationStatus, S010Analysis } from '../types';
+import { CriterionAgentReviewConfig, EvaluationStatus, RemoteLookups, S010Analysis } from '../types';
 import {
   buildS010AgentReviewRequest,
   hasS010AgentReviewMaterial,
@@ -10,6 +10,11 @@ import {
 } from '../utils/s010-agent-review';
 import * as committedSource from '../utils/committed-source';
 import { prepareCriterionAgentReviewEvidence, prepareCriterionReviewWorkspace } from '../utils/criterion-agent-review';
+import { readRepositorySnapshot } from '../utils/agent-review-repository';
+import { collectS010LibrarySources } from '../utils/s010-library-sources';
+import { renderS010HumanDetails } from '../utils/s010-report-details';
+import { sourceLine } from '../utils/remote-evidence';
+import { loadRemoteFixture, replayTransport } from './helpers/remote-replay';
 
 async function prepared(request: Awaited<ReturnType<typeof buildS010AgentReviewRequest>>) {
   return (await prepareCriterionAgentReviewEvidence(request)).request;
@@ -465,6 +470,154 @@ describe('S010 advisory agent review', () => {
 
     expect(Buffer.byteLength(content)).toBeLessThanOrEqual(48 * 1024);
     expect(JSON.parse(content).omittedDiagnostics).toBe(40);
+  });
+
+  describe('FOLIO library source', () => {
+    const BASE = 'https://repository.folio.org/repository/maven-releases/org/folio';
+    const LIBRARY = 'folio-library-sources/org.folio/folio-spring-base/10.0.1';
+    const ADVISOR = `${LIBRARY}/org/folio/spring/config/DataSourceSchemaAdvisorBeanPostProcessor.java`;
+    const POM = `<project><modelVersion>4.0.0</modelVersion><groupId>org.folio</groupId><artifactId>mod-x</artifactId><version>1.0.0</version>
+      <properties><folio-spring-base.version>10.0.1</folio-spring-base.version></properties>
+      <dependencies>
+        <dependency><groupId>org.folio</groupId><artifactId>folio-spring-base</artifactId><version>\${folio-spring-base.version}</version></dependency>
+        <dependency><groupId>org.folio</groupId><artifactId>folio-spring-cql</artifactId><version>\${folio-spring-base.version}</version></dependency>
+        <dependency><groupId>org.folio</groupId><artifactId>folio-spring-system-user</artifactId><version>10.1.0-SNAPSHOT</version></dependency>
+        <dependency><groupId>org.folio</groupId><artifactId>folio-s3-client</artifactId></dependency>
+        <dependency><groupId>org.folio</groupId><artifactId>folio-spring-testing</artifactId><version>10.0.1</version><scope>test</scope></dependency>
+      </dependencies></project>`;
+
+    async function librarySources(lookups = true) {
+      const replay = replayTransport(loadRemoteFixture('folio-library-sources'));
+      const sources = await collectS010LibrarySources(await readRepositorySnapshot(repo), lookups ? replay.transport : undefined);
+      expect(replay.unrecorded).toEqual([]);
+      // Downloads use their own budget: the evaluation's transport, shared with other criteria, records none.
+      expect(replay.transport.records).toEqual([]);
+      return { ...sources, requested: replay.requested };
+    }
+
+    beforeEach(async () => {
+      await fs.outputFile(path.join(repo, 'pom.xml'), POM);
+      await commit('src/client.ts', 'fetch(process.env.SEARCH_URL)');
+    });
+
+    it('reads only the released source of production FOLIO libraries at the versions the build files set', async () => {
+      const { sources, files, requested } = await librarySources();
+
+      expect(requested).toEqual([
+        `${BASE}/folio-spring-base/10.0.1/folio-spring-base-10.0.1-sources.jar`,
+        `${BASE}/folio-spring-cql/10.0.1/folio-spring-cql-10.0.1-sources.jar`
+      ]);
+      expect(sources.libraries.map(({ record, ...library }) => library)).toEqual([
+        { coordinate: 'org.folio:folio-s3-client', sourcePath: 'pom.xml',
+          problem: 'the repository\'s build files do not set its version (a parent POM or BOM outside the repository may)' },
+        { coordinate: 'org.folio:folio-spring-base', version: '10.0.1', sourcePath: 'pom.xml', root: LIBRARY, fileCount: 64 },
+        { coordinate: 'org.folio:folio-spring-cql', version: '10.0.1', sourcePath: 'pom.xml',
+          root: 'folio-library-sources/org.folio/folio-spring-cql/10.0.1', fileCount: 14 },
+        { coordinate: 'org.folio:folio-spring-system-user', version: '10.1.0-SNAPSHOT', sourcePath: 'pom.xml',
+          problem: '10.1.0-SNAPSHOT is a snapshot, and only released source is read' }
+      ]);
+      expect(files).toHaveLength(78);
+      expect(files.find(file => file.repoRelativePath === ADVISOR)?.content)
+        .toContain('hikariDataSource.setConnectionInitSql(String.format("SET statement_timeout = %d", queryTimeout));');
+
+      const deterministic = analysis();
+      deterministic.agentReviewLibrarySources = sources;
+      const [base, cql] = sources.libraries.slice(1, 3).map(library => library.record!);
+      expect(renderS010HumanDetails(deterministic).split('\n').slice(-8)).toEqual([
+        'FOLIO library source prepared for the agent review:',
+        '  - org.folio:folio-s3-client (declared in pom.xml): not read; the repository\'s build files do not set its version (a parent POM or BOM outside the repository may)',
+        `  - org.folio:folio-spring-base 10.0.1 (declared in pom.xml): 64 files in ${LIBRARY}`,
+        '  - org.folio:folio-spring-cql 10.0.1 (declared in pom.xml): 14 files in folio-library-sources/org.folio/folio-spring-cql/10.0.1',
+        '  - org.folio:folio-spring-system-user 10.1.0-SNAPSHOT (declared in pom.xml): not read; 10.1.0-SNAPSHOT is a snapshot, and only released source is read',
+        'Library source downloads:',
+        sourceLine(base),
+        sourceLine(cql)
+      ]);
+    });
+
+    it('takes library versions from the committed build files the agent reviews, not the working tree', async () => {
+      await fs.outputFile(path.join(repo, 'pom.xml'), POM.replace('<folio-spring-base.version>10.0.1<', '<folio-spring-base.version>10.0.0<'));
+
+      const { requested } = await librarySources();
+
+      expect(requested).toEqual([
+        `${BASE}/folio-spring-base/10.0.1/folio-spring-base-10.0.1-sources.jar`,
+        `${BASE}/folio-spring-cql/10.0.1/folio-spring-cql-10.0.1-sources.jar`
+      ]);
+    });
+
+    it('puts library source beside the repository and accepts library citations only alongside repository ones', async () => {
+      const sources = await librarySources();
+      const request = await prepared(await buildS010AgentReviewRequest(repo, analysis(), sources));
+      const workspace = prepareCriterionReviewWorkspace(request);
+      try {
+        expect(await fs.readFile(path.join(workspace.rootPath, 'docs', ADVISOR), 'utf8')).toContain('DB_QUERYTIMEOUT');
+        const manifest = await fs.readJson(workspace.manifestPath);
+        expect(manifest.files.map((file: { repoRelativePath: string }) => file.repoRelativePath)).toEqual([
+          '.criterion-agent/S010/deterministic-summary.json', '.criterion-agent/S010/library-sources.json',
+          '.criterion-agent/S010/candidate-dependencies.json', '.criterion-agent/S010/response-shape.json',
+          '.criterion-agent/S010/snapshot-manifest.json'
+        ]);
+      } finally {
+        await fs.remove(workspace.rootPath);
+      }
+      expect(JSON.parse(request.files.find(file => file.repoRelativePath === '.criterion-agent/S010/library-sources.json')!.content).libraries[1])
+        .toEqual({ coordinate: 'org.folio:folio-spring-base', version: '10.0.1', declaredIn: 'pom.xml', folder: LIBRARY, fileCount: 64 });
+      expect(request.instructions).toContain('folio-library-sources/ is not part of the repository');
+
+      const review = (references: string[]) => reviewS010WithAgent(repo, analysis(), fakeConfig({
+        recommendation: 'needs_reviewer_judgment',
+        assessments: [{ technologyId: 'search', type: 'evidence_gap', summary: 'The library sets a statement timeout only when DB_QUERYTIMEOUT is set.',
+          evidenceReferences: references, failureBounds: bounds('unverified') }],
+        reviewerActions: [{ action: 'Confirm DB_QUERYTIMEOUT in the deployment.', evidenceReferences: ['src/client.ts'] }]
+      }), undefined, sources);
+      const together = await review(['pom.xml', ADVISOR]);
+      expect(together.available).toBe(true);
+      expect(together.assessments![0].evidenceReferences).toEqual(['pom.xml', ADVISOR]);
+      const alone = await review([ADVISOR]);
+      expect(alone.available).toBe(false);
+      expect(alone.errors.join(' ')).toContain('requires repository evidence');
+    });
+
+    it('reads at most 12 libraries and does not request coordinates that are not plain', async () => {
+      const names = Array.from({ length: 13 }, (_, index) => `lib-${String(index).padStart(2, '0')}`);
+      await commit('pom.xml', `<project><modelVersion>4.0.0</modelVersion><groupId>org.folio</groupId><artifactId>mod-x</artifactId><version>1.0.0</version><dependencies>
+        ${[...names, 'x..y'].map(name => `<dependency><groupId>org.folio</groupId><artifactId>${name}</artifactId><version>1.0.0</version></dependency>`).join('')}
+      </dependencies></project>`);
+      const requested: string[] = [];
+      const lookups: RemoteLookups = {
+        records: [],
+        withLimits: () => lookups,
+        getJson: async () => { throw new Error('not used'); },
+        getBytes: async url => {
+          requested.push(url);
+          return { ok: false, reason: 'http-status', status: 404, record: { url, fetchedAt: '2026-11-12T00:00:00Z', status: 404, error: 'HTTP 404.' } };
+        }
+      };
+      const { sources } = await collectS010LibrarySources(await readRepositorySnapshot(repo), lookups);
+      expect(requested).toEqual(names.slice(0, 12).map(name => `${BASE}/${name}/1.0.0/${name}-1.0.0-sources.jar`));
+      expect(sources.libraries.slice(-2).map(({ coordinate, problem }) => ({ coordinate, problem }))).toEqual([
+        { coordinate: 'org.folio:lib-12', problem: 'the review reads at most 12 libraries' },
+        { coordinate: 'org.folio:x..y', problem: 'org.folio:x..y is not a plain Maven coordinate' }
+      ]);
+    });
+
+    it('says why there is no library source when remote lookups are off', async () => {
+      const sources = await librarySources(false);
+      expect(sources.requested).toEqual([]);
+      expect(sources.sources.notReadReason).toBe('remote lookups are off (--allow-remote-lookups)');
+      const request = await prepared(await buildS010AgentReviewRequest(repo, analysis(), sources));
+      expect(request.files.map(file => file.repoRelativePath).filter(file => file.startsWith('folio-library-sources/'))).toEqual([]);
+      expect(request.instructions).not.toContain('folio-library-sources/');
+      expect(request.instructions).toContain('Never conclude that a setting or environment variable is unused');
+    });
+
+    it('does not mix library source into a repository folder of the same name', async () => {
+      await commit('folio-library-sources/org.folio/folio-spring-base/10.0.1/Fake.java', 'class Fake {}');
+      const result = await reviewS010WithAgent(repo, analysis(), fakeConfig({}), undefined, await librarySources());
+      expect(result.available).toBe(false);
+      expect(result.errors.join(' ')).toContain('the repository has its own folio-library-sources folder');
+    });
   });
 
   async function commit(relativePath: string, content: string): Promise<void> {
