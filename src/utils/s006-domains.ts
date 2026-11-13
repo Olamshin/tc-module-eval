@@ -117,7 +117,7 @@ function* domainCandidates(text: string): Iterable<{ token: string; isUrl: boole
     ranges.push({ start: match.index, end: urls.lastIndex });
     yield { token: match[0], isUrl: true, end: urls.lastIndex };
   }
-  const emails = /[a-z0-9.!#$%&'*+/=?^_`{|}~@-]+/gi;
+  const emails = /[a-z0-9.!#$%&'*+/=?^_`{|}~-]*@[a-z0-9.!#$%&*+/=?^_{|}~@-]*|[a-z0-9.!#$%&'*+/=?^_`{|}~-]+/gi;
   let range = 0;
   while ((match = emails.exec(text)) !== null) {
     while (range < ranges.length && ranges[range].end <= match.index) range++;
