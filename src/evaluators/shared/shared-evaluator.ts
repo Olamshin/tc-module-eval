@@ -298,8 +298,8 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
 
   private async evaluateS010(repoPath: string, evaluationRun?: EvaluationRun): Promise<CriterionResult> {
     const run = this.runFor(repoPath, 'S010', evaluationRun);
-    const evidence = await run.getOrCreateArtifact('s010ThirdPartyEvidence', async () =>
-      collectS010Evidence(repoPath, this.language, await getModuleKind(run, repoPath))
+    const evidence = await run.getOrCreateArtifact('s010ThirdPartyEvidence', () =>
+      collectS010Evidence(repoPath, this.language)
     );
     const analysis = evaluateS010(evidence);
     const { agentReview, unavailableReason } = await reviewCriterionWithAgent({

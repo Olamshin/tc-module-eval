@@ -50,21 +50,40 @@ describe('S010 shared evaluator integration', () => {
     expect(result.status).toBe(EvaluationStatus.NOT_APPLICABLE);
   });
 
-  it('returns not applicable for a Stripes library, classified as S004 and S008 classify it', async () => {
-    await fs.outputJson(path.join(repo, 'package.json'), {
-      name: '@folio/stripes-acq-components',
-      dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' },
-      stripes: { actsAs: [''] }
-    });
+  const stripesPackage = (name: string, stripes: object) => ({ name, dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes });
+
+  it.each([
+    ['a Stripes package with no actsAs role (stripes-acq-components)', stripesPackage('@folio/stripes-acq-components', { actsAs: [''] }), 'library'],
+    ['a ui- package without actsAs', stripesPackage('@folio/ui-example', {}), 'ui-module'],
+    ['a package with a legacy stripes.type', stripesPackage('@folio/example', { type: 'app' }), 'ui-module'],
+    ['a package with an actsAs role', stripesPackage('@folio/example', { actsAs: ['app'] }), 'ui-module']
+  ])('classifies %s from the committed package.json', async (_name, packageJson, kind) => {
+    await fs.outputJson(path.join(repo, 'package.json'), packageJson);
     await fs.outputFile(path.join(repo, 'lib/useFunds.js'), 'export const useFunds = ky => ky.get("finance/funds");\n');
     execFileSync('git', ['add', '.'], { cwd: repo });
     execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repo });
-    const run = createEvaluationRun({ repositoryPath: repo, language: 'javascript', criteriaFilter: ['S010'] });
 
-    const result = await new TestEvaluator('javascript').evaluateCriterion('S010', repo, run);
+    const result = await new TestEvaluator('javascript').evaluateCriterion('S010', repo);
 
-    expect(result.status).toBe(EvaluationStatus.NOT_APPLICABLE);
-    expect((result.criterionDetails as S010Analysis).evidence.moduleKind).toEqual(run.artifacts.moduleKind);
+    expect((result.criterionDetails as S010Analysis).evidence.moduleKind.kind).toBe(kind);
+    expect(result.status === EvaluationStatus.NOT_APPLICABLE).toBe(kind === 'library');
+  });
+
+  it('does not take library evidence from a package.json that links outside the repository', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 's010-outside-'));
+    try {
+      await fs.outputJson(path.join(outside, 'package.json'), stripesPackage('@folio/stripes-acq-components', { actsAs: [''] }));
+      await fs.symlink(path.join(outside, 'package.json'), path.join(repo, 'package.json'));
+      execFileSync('git', ['add', '.'], { cwd: repo });
+      execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repo });
+
+      const result = await new TestEvaluator('javascript').evaluateCriterion('S010', repo);
+
+      expect(result.status).toBe(EvaluationStatus.MANUAL);
+      expect((result.criterionDetails as S010Analysis).evidence.moduleKind.kind).toBe('ambiguous');
+    } finally {
+      await fs.remove(outside);
+    }
   });
 
   it('returns manual for unsupported general Node runtime', async () => {
