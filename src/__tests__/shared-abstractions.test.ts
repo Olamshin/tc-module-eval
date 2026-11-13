@@ -467,6 +467,29 @@ describe('Criterion scheduling', () => {
     ]);
   });
 
+  it.each([
+    ['replaced on the run', (run: EvaluationRun, runAgentReview: EvaluationRun['runAgentReview']) => Object.assign(run, { runAgentReview })],
+    ['on a copy of the run', (run: EvaluationRun, runAgentReview: EvaluationRun['runAgentReview']) => ({ ...run, runAgentReview })]
+  ])('should keep the handoff when runAgentReview is wrapped %s', async (_name, wrap) => {
+    const { events, open, review } = controlledSteps();
+    const run = createEvaluationRun({ repositoryPath: '/repo', language: 'java' });
+    const original = run.runAgentReview;
+    const wrapped = wrap(run, reviewWork => {
+      events.push('traced');
+      return original(reviewWork);
+    });
+    const reviewed = (criterionId: string): CriterionFunction => async (_repoPath, evaluationRun) =>
+      manual(criterionId, await review(evaluationRun, criterionId));
+    const evaluator = new StubSectionEvaluator('Test', { X001: reviewed('X001'), X002: reviewed('X002') });
+
+    const evaluation = evaluator.evaluate('/repo', undefined, wrapped);
+    await settle();
+    expect(events).toEqual(['traced', 'X001 review', 'traced', 'X002 review']);
+    await open('X002 review');
+    await open('X001 review');
+    expect((await evaluation).map(result => result.evidence)).toEqual(['X001 reviewed', 'X002 reviewed']);
+  });
+
   it('should resolve nextAgentReviewHandoff when a review outside section evaluation starts', async () => {
     const { events, open, review } = controlledSteps();
     const run = createEvaluationRun({ repositoryPath: '/repo', language: 'java' });

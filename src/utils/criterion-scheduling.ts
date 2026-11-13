@@ -4,11 +4,11 @@ import { EvaluationRun } from '../types';
 /** Agent reviews mostly wait on the model, so a few run at once; more would mostly add provider load. */
 const AGENT_REVIEW_CONCURRENCY = 3;
 
-type AgentReviewEntry = EvaluationRun['runAgentReview'];
+/** Carried on the run, and on copies of it, so a wrapped runAgentReview still identifies its scheduler. */
+const SCHEDULER = Symbol('agentReviewScheduler');
 
 interface CriterionInvocation {
-  /** Only a review entered through this run's runAgentReview releases the invocation. */
-  owner?: AgentReviewEntry;
+  scheduler?: object;
   release(): void;
 }
 
@@ -20,11 +20,12 @@ const currentInvocation = new AsyncLocalStorage<CriterionInvocation>();
  * tasks. Without an evaluation run, each task completes before the next starts.
  */
 export async function runCriteriaInOrder<T>(tasks: Array<() => Promise<T>>, evaluationRun?: EvaluationRun): Promise<T[]> {
+  const scheduler = (evaluationRun as { [SCHEDULER]?: object } | undefined)?.[SCHEDULER];
   const results: Promise<T>[] = [];
   for (const task of tasks) {
     let release!: () => void;
     const released = new Promise<void>(resolve => { release = resolve; });
-    const result = currentInvocation.run({ owner: evaluationRun?.runAgentReview, release }, task);
+    const result = currentInvocation.run({ scheduler, release }, task);
     results.push(result);
     await Promise.race([result.then(() => undefined, () => undefined), released]);
   }
@@ -33,13 +34,14 @@ export async function runCriteriaInOrder<T>(tasks: Array<() => Promise<T>>, eval
 
 /** The review queue and handoff of one evaluation run. */
 export function createAgentReviewScheduler(): Pick<EvaluationRun, 'runAgentReview' | 'nextAgentReviewHandoff'> {
+  const scheduler = {};
   let activeReviews = 0;
   const queuedReviews: (() => void)[] = [];
   let unscheduledHandoff: (() => void) | undefined;
 
-  const runAgentReview: AgentReviewEntry = async review => {
+  const runAgentReview: EvaluationRun['runAgentReview'] = async review => {
     const invocation = currentInvocation.getStore();
-    if (invocation?.owner === runAgentReview) {
+    if (invocation?.scheduler === scheduler) {
       invocation.release();
     } else {
       unscheduledHandoff?.();
@@ -62,6 +64,7 @@ export function createAgentReviewScheduler(): Pick<EvaluationRun, 'runAgentRevie
 
   return {
     runAgentReview,
-    nextAgentReviewHandoff: () => new Promise<void>(resolve => { unscheduledHandoff = resolve; })
-  };
+    nextAgentReviewHandoff: () => new Promise<void>(resolve => { unscheduledHandoff = resolve; }),
+    [SCHEDULER]: scheduler
+  } as Pick<EvaluationRun, 'runAgentReview' | 'nextAgentReviewHandoff'>;
 }
