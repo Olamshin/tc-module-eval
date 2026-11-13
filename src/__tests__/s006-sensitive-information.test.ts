@@ -401,6 +401,28 @@ describe('S006 bounded repository candidate scanning', () => {
     expect(result.coverage.complete).toBe(true);
   });
 
+  it('skips build output only at the root of the repository or of a module, and reads source folders with the same names', async () => {
+    repoPath = createTempRepo();
+    writeRepoFile(repoPath, 'package.json', '{"name":"@folio/inventory"}\n');
+    writeRepoFile(repoPath, 'src/reports/InstancesReport.js', 'export const url = "/inventory";\n');
+    writeRepoFile(repoPath, 'src/gen/Ids.js', 'export const id = 1;\n');
+    writeRepoFile(repoPath, 'reports/summary.json', '{}\n');
+    writeRepoFile(repoPath, 'service/build.gradle', 'plugins {}\n');
+    writeRepoFile(repoPath, 'service/build/resources/main/application.yml', 'ignored: true\n');
+    writeRepoFile(repoPath, 'src/node_modules/pkg/index.js', 'ignored();\n');
+
+    const result = scanS006RepositoryCandidates(repoPath);
+
+    expect(result.files.map(file => file.path).sort()).toEqual([
+      'package.json', 'service/build.gradle', 'src/gen/Ids.js', 'src/reports/InstancesReport.js'
+    ]);
+    expect(result.coverage.skippedFiles.map(file => [file.path, file.reason])).toEqual([
+      ['reports', 'generated-artifact'],
+      ['service/build', 'generated-artifact'],
+      ['src/node_modules', 'dependency-directory']
+    ]);
+  });
+
   it('skips binary files, symlinks, dependency directories, build output, coverage output, VCS metadata, and generated reports', async () => {
     repoPath = createTempRepo();
     writeRepoFile(repoPath, 'src/main/resources/application.yml', 'okapi: http://localhost:9130\n');
@@ -2467,6 +2489,7 @@ describe('S006 reviewer decisions', () => {
     for (let index = 0; index < 260; index++) {
       writeRepoFile(repoPath, `config/data/a${String(index).padStart(3, '0')}.csv`, 'a,b\n');
     }
+    writeRepoFile(repoPath, 'config/zz/pom.xml', '<project/>\n');
     writeRepoFile(repoPath, 'config/zz/build/app.yml', 'name: app\n');
 
     const result = await analyzeWithGitleaksReport();

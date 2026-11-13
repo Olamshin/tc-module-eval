@@ -6,7 +6,7 @@ import {
   S006ScanWarning,
   S006SkippedFile
 } from '../types';
-import { GENERATED_REPORT_DIRECTORY_PATTERN, decodeBoundedUtf8, isBinaryBuffer, isPathInside, isWithinRepo, realPath, relativePosixPath } from './repo-files';
+import { decodeBoundedUtf8, isBinaryBuffer, isBuildModuleRoot, isPathInside, isWithinRepo, realPath, relativePosixPath } from './repo-files';
 import { MAX_S006_EXCERPT_BYTES } from './s006-detectors';
 
 export const MAX_S006_SCAN_TRAVERSAL_ENTRIES = 5000;
@@ -43,6 +43,7 @@ const S006_SKIPPED_DIRECTORY_REASONS: ReadonlyMap<string, S006SkippedFile['reaso
   ['generated', 'generated-artifact'],
   ['gen', 'generated-artifact']
 ]);
+const S006_VCS_DIRECTORIES: ReadonlySet<string> = new Set(['.git', '.hg', '.svn']);
 const S006_SUPPORTED_TEXT_FILE_PATTERN =
   /\.(?:bash|cjs|cfg|conf|crt|env|gradle|groovy|ini|java|js|json|jsx|key|kt|kts|md|mjs|pem|properties|py|rb|sh|sql|tf|tfvars|toml|ts|tsx|txt|xml|yaml|yml|zsh)$/i;
 const S006_SUPPORTED_SPECIAL_FILE_PATTERN =
@@ -333,7 +334,10 @@ function collectBoundedS006EvidenceCandidates(repoPath: string, options: S006Rep
 
     const directoryName = path.basename(currentPath);
     const skippedReason = S006_SKIPPED_DIRECTORY_REASONS.get(directoryName);
-    if (skippedReason && currentPath !== repoPath) {
+    // Build output is written at the root of the repository or of a module; elsewhere a folder such as src/reports is source.
+    const skipped = skippedReason && currentPath !== repoPath
+      && (skippedReason !== 'generated-artifact' || S006_VCS_DIRECTORIES.has(directoryName) || isBuildModuleRoot(repoPath, path.dirname(currentPath)));
+    if (skippedReason && skipped) {
       pushS006SkippedFile(skippedFiles, {
         path: relativePath,
         reason: skippedReason,
@@ -420,9 +424,6 @@ const S006_NON_MATERIAL_UNSUPPORTED_PATTERN = /\.(?:csv|xsl|sample|disabled)$/i;
 
 function classifyS006CandidatePath(relativePath: string): { eligible: boolean; materialUnsupported: boolean; nonMaterialUnsupported?: boolean } {
   const normalized = relativePath.replace(/\\/g, '/');
-  if (GENERATED_REPORT_DIRECTORY_PATTERN.test(normalized)) {
-    return { eligible: false, materialUnsupported: false };
-  }
   if (S006_SUPPORTED_SPECIAL_FILE_PATTERN.test(normalized) || S006_SUPPORTED_TEXT_FILE_PATTERN.test(normalized)) {
     return { eligible: true, materialUnsupported: false };
   }
