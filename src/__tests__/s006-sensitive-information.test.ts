@@ -847,7 +847,13 @@ describe('S006 sensitive information finding extraction', () => {
         '  password: ${KAFKA_PASSWORD:s3cr3t}',
         '  token: ${KAFKA_TOKEN:-Zq8vT2mKp4LxW9nR}',
         '  secret: ${KAFKA_SECRET:}',
-        '  api-key: ${KAFKA_API_KEY}'
+        '  api-key: ${KAFKA_API_KEY}',
+        'lookups:',
+        '  password: ${env:DB_PASSWORD}',
+        '  secret: ${sys:folio.client.secret}',
+        '  token: ${file:/run/secrets/okapi-token}',
+        '  passwd: ${DB_PASSWORD:?DB_PASSWORD must be set}',
+        '  pwd: ${DB_PASSWORD:+configured}'
       ].join('\n')
     );
 
