@@ -7,7 +7,7 @@ import { CriterionAgentReviewConfig, CriterionResult, EvaluationStatus } from '.
 import { createEvaluationRun } from '../utils/evaluation-run';
 import { prepareCriterionAgentReviewEvidence } from '../utils/criterion-agent-review';
 import { buildS011AgentReviewRequest } from '../utils/s011-agent-review';
-import { createHtmlReport } from '../utils/report-html-template';
+import { prepareHtmlReport } from '../utils/report-presentation';
 
 class TestEvaluator extends SharedEvaluator {}
 
@@ -72,13 +72,16 @@ describe('S011 advisory agent review', () => {
     expect(result.details).toContain(`    - java:S5542 suppressions in ${HELPER} — Potential problem:`);
     expect(result.details).toContain('    - Sonar analysis scope in pom.xml — Needs verification:');
     expect(result.details).toContain('  - The automated result is unchanged.');
-    const html = createHtmlReport({
+    const [item] = prepareHtmlReport({
       repositoryUrl: 'https://github.com/folio-org/mod-users', moduleName: 'mod-users', evaluatedAt: new Date('2026-10-23T00:00:00Z'),
       language: 'java', criteria: [result]
-    });
+    }).view.items;
     // The HTML report names the groups the same way, not by their raw ids.
-    expect(html).toContain(`java:S5542 suppressions in ${HELPER}`);
-    expect(html).not.toContain(`suppression:java:S5542:${HELPER} —`);
+    expect(item.tree[0].children.find(node => node.text === 'Findings')!.children.map(node => node.text)).toEqual([
+      `java:S2077 suppressions in ${SQL} — Supported by evidence`,
+      `java:S5542 suppressions in ${HELPER} — Potential problem`,
+      'Sonar analysis scope in pom.xml — Needs verification'
+    ]);
   });
 
   it.each([
