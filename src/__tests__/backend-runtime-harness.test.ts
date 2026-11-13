@@ -558,7 +558,7 @@ describe('backend runtime evidence in the evaluation', () => {
       '  - Cleanup left Docker resources of this run behind; remove them by hand:',
       '    - network 7b2b710f1bd2',
       '    - docker network rm 7b2b710f1bd2: network has active endpoints',
-      '  - The module ran in Docker. GET requests in tenant tcevala to each provided path without parameters; 404 or 405 means no implementation answered:',
+      '  - The module ran in Docker. GET requests in tenant tcevala to each provided path without parameters; 404 or 405 may mean no implementation answered, but a 404 may also come from a call the module forwarded to the Okapi stub, which answers 404 to everything:',
       '    - GET /examples answered 200',
       '    - GET /example-missing answered 404',
       '    - GET /slow ↵ row answered nothing (no response within 15000 ms)',

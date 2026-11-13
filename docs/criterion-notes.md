@@ -553,7 +553,7 @@ B003 checks that every endpoint the module provides has an executable implementa
 
 The checklist has B003-C1: each endpoint the tool could not match has an implementation that serves its methods, starting from the spec, descriptor or route of each; and B003-C2, reviewer-only: each endpoint a library serves is implemented by the version of that library the build declares, starting from the dependency's line in the build file. Agent review runs for a manual or failed result with one obligation per B003-C1 endpoint (see [Agent Review](agent-review.md#b00x-backend-criteria-review)); it does not run when every unmatched endpoint is served by a library.
 
-With `--allow-runtime-checks`, the report adds "Runtime evidence (informational; it does not change the status)": the status of `GET` on each provided path without parameters in the first test tenant, where 404 or 405 means no implementation answered, or why the [backend runtime harness](#backend-runtime-harness) collected none (`criterionDetails.runtime`). Without the flag, B003's report and details are unchanged.
+With `--allow-runtime-checks`, the report adds "Runtime evidence (informational; it does not change the status)": the status of `GET` on each provided path without parameters in the first test tenant, where 404 or 405 may mean no implementation answered (a 404 may also come from a call the module forwarded to the Okapi stub, which answers 404 to everything), or why the [backend runtime harness](#backend-runtime-harness) collected none (`criterionDetails.runtime`). Without the flag, B003's report and details are unchanged.
 
 ## B004 Environment Variables
 
