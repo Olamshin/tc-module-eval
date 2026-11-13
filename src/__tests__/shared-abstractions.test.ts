@@ -1,4 +1,4 @@
-import { CriterionResult, EvaluationStatus, SectionEvaluator, CriterionFunction, ModuleKindResult } from '../types';
+import { CriterionResult, EvaluationStatus, SectionEvaluator, CriterionFunction, ModuleKindResult, EvaluationRun } from '../types';
 import { SharedEvaluator } from '../evaluators/shared/shared-evaluator';
 import { JavaScriptSharedEvaluator } from '../evaluators/javascript/javascript-shared-evaluator';
 import { CompositeLanguageEvaluator } from '../evaluators/base/composite-language-evaluator';
@@ -6,6 +6,7 @@ import { BaseSectionEvaluator } from '../evaluators/base/section-evaluator';
 import { CatalogSectionEvaluator } from '../evaluators/base/catalog-section-evaluator';
 import { setLogger, resetLogger, NoopLogger } from '../utils/logger';
 import { createEvaluationRun } from '../utils/evaluation-run';
+import { reviewCriterionWithAgent } from '../utils/criterion-agent-review';
 import { EVALUATOR_SECRETS, withEvaluatorSecrets } from './helpers/evaluator-secrets';
 
 // Mock fs-extra (needed by SharedEvaluator criteria)
@@ -212,58 +213,296 @@ describe('BaseSectionEvaluator', () => {
     expect(results[1].evidence).toBe('Evaluation failed: Handler exploded at http://localhost:8080/health with [REDACTED_SONAR_TOKEN]');
     expect(results[2].status).toBe(EvaluationStatus.PASS);
   });
+});
 
-  it('should overlap agent reviews but keep deterministic work sequential and results in order', async () => {
-    const run = createEvaluationRun({ repositoryPath: '/repo', language: 'java' });
-    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-    let deterministic = 0;
-    let maxDeterministic = 0;
-    let reviews = 0;
-    let maxReviews = 0;
-    const finished: string[] = [];
-    // Earlier criteria review longest, so reviews finish in reverse order.
-    const criterion = (id: string, reviewMs?: number, failure?: 'analysis' | 'review'): CriterionFunction => async (_repoPath, evaluationRun) => {
-      deterministic++;
-      maxDeterministic = Math.max(maxDeterministic, deterministic);
-      await delay(5);
-      deterministic--;
-      if (failure === 'analysis') throw new Error(`${id} analysis failed`);
-      if (reviewMs === undefined) return { criterionId: id, status: EvaluationStatus.PASS, evidence: `${id} done` };
-      const review = await evaluationRun!.runAgentReview(async () => {
-        reviews++;
-        maxReviews = Math.max(maxReviews, reviews);
-        await delay(reviewMs);
-        reviews--;
-        if (failure === 'review') throw new Error(`${id} review failed`);
-        return `${id} reviewed`;
-      });
-      finished.push(id);
-      return { criterionId: id, status: EvaluationStatus.MANUAL, evidence: review };
+describe('Criterion scheduling', () => {
+  beforeEach(() => {
+    setLogger(new NoopLogger());
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  /** Lets every callback of already-settled promises run, including the section loop's. */
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const rows = (results: CriterionResult[]) => results.map(result => [result.criterionId, result.status, result.evidence]);
+  const pass = (criterionId: string): CriterionResult => ({ criterionId, status: EvaluationStatus.PASS, evidence: `${criterionId} done` });
+  const manual = (criterionId: string, evidence: string): CriterionResult => ({ criterionId, status: EvaluationStatus.MANUAL, evidence });
+
+  /** Criterion steps that record an event and then wait until the test opens or fails them. */
+  function controlledSteps() {
+    const events: string[] = [];
+    const gates = new Map<string, { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void }>();
+    const gate = (name: string) => {
+      let entry = gates.get(name);
+      if (!entry) {
+        let resolve!: () => void;
+        let reject!: (error: Error) => void;
+        const promise = new Promise<void>((onResolve, onReject) => {
+          resolve = onResolve;
+          reject = onReject;
+        });
+        entry = { promise, resolve, reject };
+        gates.set(name, entry);
+      }
+      return entry;
     };
+    const step = async (name: string) => {
+      events.push(name);
+      await gate(name).promise;
+    };
+    return {
+      events,
+      step,
+      open: async (name: string) => {
+        gate(name).resolve();
+        await settle();
+      },
+      fail: async (name: string) => {
+        gate(name).reject(new Error(`${name} failed`));
+        await settle();
+      },
+      later: (name: string) => gate(name).promise,
+      review: (run: EvaluationRun | undefined, criterionId: string) => run!.runAgentReview(async () => {
+        await step(`${criterionId} review`);
+        return `${criterionId} reviewed`;
+      })
+    };
+  }
+
+  it('should start the next criterion only after one completes, fails or skips its review', async () => {
+    const { events, step, open, fail } = controlledSteps();
     const evaluator = new StubSectionEvaluator('Test', {
-      X001: criterion('X001', 120),
-      X002: criterion('X002', undefined, 'analysis'),
-      X003: criterion('X003', 100),
-      X004: criterion('X004', 80, 'review'),
-      X005: criterion('X005', 60),
-      X006: criterion('X006'),
-      X007: criterion('X007', 20)
+      X001: async () => {
+        await step('X001 analysis');
+        return pass('X001');
+      },
+      X002: async () => {
+        await step('X002 analysis');
+        return pass('X002');
+      },
+      X003: async (_repoPath, evaluationRun) => {
+        const skipped = await reviewCriterionWithAgent({
+          criterionId: 'X003',
+          status: EvaluationStatus.MANUAL,
+          hasReviewMaterial: true,
+          evaluationRun: evaluationRun!,
+          review: async () => { throw new Error('X003 review should not run'); }
+        });
+        await step('X003 after skipped review');
+        return manual('X003', skipped.unavailableReason!);
+      },
+      X004: async () => {
+        await step('X004 analysis');
+        return pass('X004');
+      }
     });
 
-    const results = await evaluator.evaluate('/repo', undefined, run);
+    const evaluation = evaluator.evaluate('/repo', undefined, createEvaluationRun({ repositoryPath: '/repo', language: 'java' }));
+    await settle();
+    expect(events).toEqual(['X001 analysis']);
+    await open('X001 analysis');
+    expect(events).toEqual(['X001 analysis', 'X002 analysis']);
+    await fail('X002 analysis');
+    expect(events).toEqual(['X001 analysis', 'X002 analysis', 'X003 after skipped review']);
+    await open('X003 after skipped review');
+    expect(events).toEqual(['X001 analysis', 'X002 analysis', 'X003 after skipped review', 'X004 analysis']);
+    await open('X004 analysis');
 
-    expect(results.map(result => [result.criterionId, result.evidence])).toEqual([
-      ['X001', 'X001 reviewed'],
-      ['X002', 'Evaluation failed: X002 analysis failed'],
-      ['X003', 'X003 reviewed'],
-      ['X004', 'Evaluation failed: X004 review failed'],
-      ['X005', 'X005 reviewed'],
-      ['X006', 'X006 done'],
-      ['X007', 'X007 reviewed']
+    expect(rows(await evaluation)).toEqual([
+      ['X001', EvaluationStatus.PASS, 'X001 done'],
+      ['X002', EvaluationStatus.MANUAL, 'Evaluation failed: X002 analysis failed'],
+      ['X003', EvaluationStatus.MANUAL, 'agent review is disabled or unconfigured'],
+      ['X004', EvaluationStatus.PASS, 'X004 done']
     ]);
-    expect(maxDeterministic).toBe(1);
-    expect(maxReviews).toBe(3);
-    expect(finished[0]).not.toBe('X001');
+  });
+
+  it('should start later criteria while reviews wait, run three reviews at once in FIFO order and keep result order', async () => {
+    const { events, open, fail, review } = controlledSteps();
+    const reviewed = (criterionId: string): CriterionFunction => async (_repoPath, evaluationRun) => {
+      events.push(`${criterionId} start`);
+      return manual(criterionId, await review(evaluationRun, criterionId));
+    };
+    const evaluator = new StubSectionEvaluator('Test', {
+      X001: reviewed('X001'),
+      X002: reviewed('X002'),
+      X003: reviewed('X003'),
+      X004: reviewed('X004'),
+      X005: reviewed('X005')
+    });
+
+    const evaluation = evaluator.evaluate('/repo', undefined, createEvaluationRun({ repositoryPath: '/repo', language: 'java' }));
+    await settle();
+    expect(events).toEqual([
+      'X001 start', 'X001 review', 'X002 start', 'X002 review', 'X003 start', 'X003 review', 'X004 start', 'X005 start'
+    ]);
+    await fail('X002 review');
+    expect(events.slice(8)).toEqual(['X004 review']);
+    await open('X003 review');
+    expect(events.slice(8)).toEqual(['X004 review', 'X005 review']);
+    await open('X005 review');
+    await open('X004 review');
+    await open('X001 review');
+
+    expect(rows(await evaluation)).toEqual([
+      ['X001', EvaluationStatus.MANUAL, 'X001 reviewed'],
+      ['X002', EvaluationStatus.MANUAL, 'Evaluation failed: X002 review failed'],
+      ['X003', EvaluationStatus.MANUAL, 'X003 reviewed'],
+      ['X004', EvaluationStatus.MANUAL, 'X004 reviewed'],
+      ['X005', EvaluationStatus.MANUAL, 'X005 reviewed']
+    ]);
+  });
+
+  it('should let only a criterion\'s first review start the next criterion', async () => {
+    const { events, step, open, later, review } = controlledSteps();
+    let lateReview: Promise<string> | undefined;
+    const evaluator = new StubSectionEvaluator('Test', {
+      X001: async (_repoPath, evaluationRun) => {
+        await evaluationRun!.runAgentReview(async () => 'first review');
+        await step('X001 between reviews');
+        return manual('X001', await review(evaluationRun, 'X001'));
+      },
+      X002: async () => {
+        await step('X002 analysis');
+        return pass('X002');
+      },
+      X003: async (_repoPath, evaluationRun) => {
+        events.push('X003 start');
+        lateReview = later('X003 late').then(() => evaluationRun!.runAgentReview(async () => {
+          events.push('X003 late review');
+          return 'late';
+        }));
+        return pass('X003');
+      },
+      X004: async () => {
+        await step('X004 analysis');
+        return pass('X004');
+      },
+      X005: async () => {
+        events.push('X005 start');
+        return pass('X005');
+      }
+    });
+
+    const evaluation = evaluator.evaluate('/repo', undefined, createEvaluationRun({ repositoryPath: '/repo', language: 'java' }));
+    await settle();
+    expect(events).toEqual(['X001 between reviews', 'X002 analysis']);
+    await open('X001 between reviews');
+    expect(events).toEqual(['X001 between reviews', 'X002 analysis', 'X001 review']);
+    await open('X002 analysis');
+    expect(events.slice(3)).toEqual(['X003 start', 'X004 analysis']);
+    await open('X003 late');
+    expect(events.slice(3)).toEqual(['X003 start', 'X004 analysis', 'X003 late review']);
+    await open('X004 analysis');
+    expect(events.slice(3)).toEqual(['X003 start', 'X004 analysis', 'X003 late review', 'X005 start']);
+    await open('X001 review');
+
+    expect(rows(await evaluation)).toEqual([
+      ['X001', EvaluationStatus.MANUAL, 'X001 reviewed'],
+      ['X002', EvaluationStatus.PASS, 'X002 done'],
+      ['X003', EvaluationStatus.PASS, 'X003 done'],
+      ['X004', EvaluationStatus.PASS, 'X004 done'],
+      ['X005', EvaluationStatus.PASS, 'X005 done']
+    ]);
+    await expect(lateReview).resolves.toBe('late');
+  });
+
+  it('should let work after a review overlap a later criterion but finish a section before the next starts', async () => {
+    const { events, step, open, review } = controlledSteps();
+    const first = new StubSectionEvaluator('First', {
+      X001: async (_repoPath, evaluationRun) => {
+        const evidence = await review(evaluationRun, 'X001');
+        await step('X001 after review');
+        return manual('X001', evidence);
+      },
+      X002: async () => {
+        await step('X002 analysis');
+        return pass('X002');
+      }
+    });
+    const second = new StubSectionEvaluator('Second', {
+      Y001: async () => {
+        events.push('Y001 start');
+        return pass('Y001');
+      }
+    });
+
+    const evaluation = new TestCompositeEvaluator([first, second])
+      .evaluate('/repo', undefined, createEvaluationRun({ repositoryPath: '/repo', language: 'java' }));
+    await settle();
+    expect(events).toEqual(['X001 review', 'X002 analysis']);
+    await open('X001 review');
+    expect(events).toEqual(['X001 review', 'X002 analysis', 'X001 after review']);
+    await open('X002 analysis');
+    expect(events).toEqual(['X001 review', 'X002 analysis', 'X001 after review']);
+    await open('X001 after review');
+    expect(events).toEqual(['X001 review', 'X002 analysis', 'X001 after review', 'Y001 start']);
+
+    expect(rows(await evaluation)).toEqual([
+      ['X001', EvaluationStatus.MANUAL, 'X001 reviewed'],
+      ['X002', EvaluationStatus.PASS, 'X002 done'],
+      ['Y001', EvaluationStatus.PASS, 'Y001 done']
+    ]);
+  });
+
+  it('should run criteria one after another when the section has no evaluation run', async () => {
+    const { events, open, review } = controlledSteps();
+    const ownRun = (criterionId: string): CriterionFunction => async (_repoPath, evaluationRun) => {
+      const run = evaluationRun ?? createEvaluationRun({ repositoryPath: '/repo', language: 'java', criteriaFilter: [criterionId] });
+      return manual(criterionId, await review(run, criterionId));
+    };
+    const evaluator = new StubSectionEvaluator('Test', { X001: ownRun('X001'), X002: ownRun('X002') });
+
+    const evaluation = evaluator.evaluate('/repo');
+    await settle();
+    expect(events).toEqual(['X001 review']);
+    await open('X001 review');
+    expect(events).toEqual(['X001 review', 'X002 review']);
+    await open('X002 review');
+
+    expect(rows(await evaluation)).toEqual([
+      ['X001', EvaluationStatus.MANUAL, 'X001 reviewed'],
+      ['X002', EvaluationStatus.MANUAL, 'X002 reviewed']
+    ]);
+  });
+
+  it.each([
+    ['replaced on the run', (run: EvaluationRun, runAgentReview: EvaluationRun['runAgentReview']) => Object.assign(run, { runAgentReview })],
+    ['on a copy of the run', (run: EvaluationRun, runAgentReview: EvaluationRun['runAgentReview']) => ({ ...run, runAgentReview })]
+  ])('should keep the handoff when runAgentReview is wrapped %s', async (_name, wrap) => {
+    const { events, open, review } = controlledSteps();
+    const run = createEvaluationRun({ repositoryPath: '/repo', language: 'java' });
+    const original = run.runAgentReview;
+    const wrapped = wrap(run, reviewWork => {
+      events.push('traced');
+      return original(reviewWork);
+    });
+    const reviewed = (criterionId: string): CriterionFunction => async (_repoPath, evaluationRun) =>
+      manual(criterionId, await review(evaluationRun, criterionId));
+    const evaluator = new StubSectionEvaluator('Test', { X001: reviewed('X001'), X002: reviewed('X002') });
+
+    const evaluation = evaluator.evaluate('/repo', undefined, wrapped);
+    await settle();
+    expect(events).toEqual(['traced', 'X001 review', 'traced', 'X002 review']);
+    await open('X002 review');
+    await open('X001 review');
+    expect((await evaluation).map(result => result.evidence)).toEqual(['X001 reviewed', 'X002 reviewed']);
+  });
+
+  it('should resolve nextAgentReviewHandoff when a review outside section evaluation starts', async () => {
+    const { events, open, review } = controlledSteps();
+    const run = createEvaluationRun({ repositoryPath: '/repo', language: 'java' });
+    const handoff = run.nextAgentReviewHandoff().then(() => events.push('handoff'));
+    await settle();
+    expect(events).toEqual([]);
+
+    const reviewed = review(run, 'X001');
+    await settle();
+    expect(events).toEqual(['X001 review', 'handoff']);
+    await open('X001 review');
+    await expect(reviewed).resolves.toBe('X001 reviewed');
+    await handoff;
   });
 });
 
