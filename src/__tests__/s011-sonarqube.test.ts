@@ -340,6 +340,48 @@ describe('S011 SonarQube findings', () => {
       expect(result.requested.some(url => url.includes('branch=master'))).toBe(false);
     });
 
+    describe('on a tag SonarCloud keeps as a SHORT branch', () => {
+      const tag = 'v6.0.11';
+      const onTag = (analysisDates: string[]) => {
+        const moved = Object.fromEntries(Object.entries(MOD_SEARCH).map(([url, response]) => [url.replace('&branch=master', `&branch=${tag}`), response]));
+        const analyses = Object.keys(moved).find(url => url.includes('project_analyses/search'))!;
+        moved[analyses] = { status: 400, body: { errors: [{ msg: `Branch '${tag}' is not of type LONG` }] } };
+        let listReads = 0;
+        const lookups = (inner: RemoteLookups): RemoteLookups => ({
+          records: inner.records,
+          getBytes: url => inner.getBytes(url),
+          withLimits: limits => inner.withLimits(limits),
+          async getJson(url: string) {
+            const answer = await inner.getJson(url);
+            if (!url.includes('project_branches/list') || !answer.ok) return answer;
+            const date = analysisDates[Math.min(listReads++, analysisDates.length - 1)];
+            const json = JSON.parse(JSON.stringify(answer.json));
+            json.branches.push({ name: tag, isMain: false, type: 'SHORT', analysisDate: date, commit: { sha: COMMITS['mod-search'] } });
+            return { ...answer, json };
+          }
+        });
+        return { responses: moved, lookups, branch: tag, reads: () => listReads };
+      };
+
+      it('reads its analysis from the branch list instead of the analyses SonarCloud refuses for it', async () => {
+        const options = onTag(['2026-10-15T11:00:42+0000']);
+        const result = await evaluate(await repo('mod-search'), options);
+
+        expect(result.status).toBe(EvaluationStatus.FAIL);
+        expect(result.details).toContain(`  - Project: org.folio:mod-search, branch ${tag}`);
+        expect(result.requested.filter(url => url.includes('project_analyses/search'))).toEqual([]);
+        expect(options.reads()).toBe(2);
+        expect(result.requested.some(url => url.includes('branch=master'))).toBe(false);
+      });
+
+      it('is manual when the branch list shows a newer analysis on the second read', async () => {
+        const result = await evaluate(await repo('mod-search'), onTag(['2026-10-15T11:00:42+0000', '2026-10-16T08:00:00+0000']));
+
+        expect(result.status).toBe(EvaluationStatus.MANUAL);
+        expect(result.evidence).toContain('SonarCloud analysed the project again while the tool was reading it (2026-10-15 and 2026-10-16)');
+      });
+    });
+
     it('reads the main branch when SonarCloud has no analysis of the requested one, and says so', async () => {
       const result = await evaluate(await repo('mod-search'), { responses: MOD_SEARCH, branch: 'feature-x' });
 

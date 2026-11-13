@@ -147,7 +147,9 @@ export async function collectSonarCloudSnapshot(
     snapshot.problem = `SonarCloud's branch list could not be read${branches.ok ? '.' : `: ${branches.record.error}`}`;
     return snapshot;
   }
-  const names = branchList.flatMap(item => typeof item?.name === 'string' ? [{ name: item.name as string, main: item.isMain === true }] : []);
+  const names = branchList.flatMap(item => typeof item?.name === 'string'
+    ? [{ name: item.name as string, main: item.isMain === true, short: item.type === 'SHORT', listed: item }]
+    : []);
   const main = names.find(item => item.main);
   const requested = requestedBranch ? names.find(item => item.name === requestedBranch) : undefined;
   const branch = requested ?? main;
@@ -160,7 +162,22 @@ export async function collectSonarCloudSnapshot(
   if (requestedBranch && !requested) snapshot.requestedBranchNotAnalysed = requestedBranch;
   const onBranch = (params: Record<string, string>) => ({ ...params, branch: branch.name });
 
-  const latestAnalysis = async () => {
+  // SonarCloud keeps tag analyses as SHORT branches, which project_analyses/search rejects ("not of type LONG");
+  // the branch list carries their analysis date and commit instead.
+  const shortBranchAnalysis = async (listed?: Record<string, unknown>) => {
+    if (!listed) {
+      const again = record(await get('project_branches/list', { project: projectKey }));
+      const list = again.ok ? arrayAt(again.json, 'branches') : undefined;
+      if (!list) return { problem: `SonarCloud's branch list could not be read${again.ok ? '.' : `: ${again.record.error}`}` };
+      listed = list.find(item => item?.name === branch.name);
+    }
+    const date = listed?.analysisDate;
+    const revision = objectAt(listed, 'commit')?.sha;
+    if (typeof date !== 'string') return { problem: `SonarCloud has no analysis of branch ${branch.name}.` };
+    return { key: date, date, revision: typeof revision === 'string' ? revision : undefined };
+  };
+  const latestAnalysis = async (listed?: Record<string, unknown>) => {
+    if (branch.short) return shortBranchAnalysis(listed);
     const result = record(await get('project_analyses/search', onBranch({ project: projectKey, ps: '1' })));
     if (!result.ok) return { problem: `SonarCloud's analyses could not be read: ${result.record.error}` };
     const analysis = arrayAt(result.json, 'analyses')?.[0];
@@ -168,7 +185,7 @@ export async function collectSonarCloudSnapshot(
     if (typeof analysis.key !== 'string' || typeof analysis.date !== 'string') return { problem: 'SonarCloud\'s latest analysis has no key or date.' };
     return { key: analysis.key, date: analysis.date, revision: typeof analysis.revision === 'string' ? analysis.revision : undefined };
   };
-  const analysis = await latestAnalysis();
+  const analysis = await latestAnalysis(branch.listed);
   if ('problem' in analysis) {
     snapshot.problem = analysis.problem;
     return snapshot;
