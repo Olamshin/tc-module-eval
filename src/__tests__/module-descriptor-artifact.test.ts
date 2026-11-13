@@ -14,6 +14,7 @@ import { NoopLogger, resetLogger, setLogger } from '../utils/logger';
 
 class FakeRunner implements CommandRunner {
   calls: CommandExecutionRequest[] = [];
+  canRun?: (request: CommandExecutionRequest) => boolean;
 
   constructor(private readonly handler: (request: CommandExecutionRequest) => CommandExecutionResult) {}
 
@@ -324,8 +325,108 @@ describe('module-descriptor-artifact', () => {
 
       expect(result.status).toBe('produced');
       expect(result.descriptorPath).toBe('module-descriptor.json');
-      expect(result.absolutePath).toBe(path.join(repo, 'module-descriptor.json'));
+      expect(result.absolutePath).toBeUndefined();
+      expect(result.content).toBe(JSON.stringify({ id: 'folio_example-1.0.0' }));
       expect(result.warnings).toEqual(['module-descriptor.json was generated during this evaluation; it is not committed to the repository.']);
+      expect(fs.readdirSync(repo).sort()).toEqual(['ModuleDescriptor.json', 'package.json']);
+    });
+
+    it('should prefer a committed ModuleDescriptor.json the script rewrote over a stale module-descriptor.json', async () => {
+      const repo = stripesRepo();
+      const descriptor = path.join(repo, 'ModuleDescriptor.json');
+      fs.writeFileSync(descriptor, JSON.stringify({ id: 'folio_old-0.1.0' }));
+      fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_stale-0.1.0' }));
+      const past = new Date('2020-01-01T00:00:00Z');
+      fs.utimesSync(descriptor, past, past);
+      fs.utimesSync(path.join(repo, 'module-descriptor.json'), past, past);
+      const runner = scriptRunner(repo, () => fs.writeFileSync(descriptor, JSON.stringify({ id: 'folio_example-1.0.0' })));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('produced');
+      expect(result.descriptorPath).toBe('ModuleDescriptor.json');
+      expect(result.absolutePath).toBe(descriptor);
+      expect(result.content).toBe(JSON.stringify({ id: 'folio_example-1.0.0' }));
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('should not use a committed descriptor when the script wrote nothing', async () => {
+      const repo = stripesRepo();
+      fs.writeFileSync(path.join(repo, 'ModuleDescriptor.json'), JSON.stringify({ id: 'folio_stale-0.1.0' }));
+      const runner = scriptRunner(repo, () => undefined);
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('missing');
+      expect(result.errors).toEqual(['The build-mod-descriptor script ran, but it did not write ModuleDescriptor.json or module-descriptor.json at the repository root.']);
+    });
+
+    it('should reject a module-descriptor.json symlinked outside the repository and remove the link', async () => {
+      const repo = stripesRepo();
+      const outside = path.join(tempRepo(), 'descriptor.json');
+      fs.writeFileSync(outside, JSON.stringify({ id: 'folio_outside-1.0.0' }));
+      const runner = scriptRunner(repo, () => fs.symlinkSync(outside, path.join(repo, 'module-descriptor.json')));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('missing');
+      expect(fs.readdirSync(repo)).toEqual(['package.json']);
+      expect(fs.readFileSync(outside, 'utf-8')).toBe(JSON.stringify({ id: 'folio_outside-1.0.0' }));
+    });
+
+    it('should record a read error when the script leaves something other than a file', async () => {
+      const repo = stripesRepo();
+      const runner = scriptRunner(repo, () => fs.mkdirSync(path.join(repo, 'module-descriptor.json')));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('produced');
+      expect(result.descriptorPath).toBe('module-descriptor.json');
+      expect(result.readError).toBe('it is not a regular file');
+      expect(result.content).toBeUndefined();
+      expect(fs.readdirSync(repo)).toEqual(['package.json']);
+    });
+
+    it('should not write .npmrc when the runner would block the install', async () => {
+      const repo = stripesRepo();
+      const npmrcAtInstall: boolean[] = [];
+      const runner = new FakeRunner(request => {
+        npmrcAtInstall.push(fs.existsSync(path.join(repo, '.npmrc')));
+        return commandResult(request, 'blocked');
+      });
+      runner.canRun = () => false;
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('unsafe-to-run');
+      expect(npmrcAtInstall).toEqual([false]);
+    });
+
+    it('should keep the result and remove the rest when one removal fails', async () => {
+      const repo = stripesRepo();
+      const realFs: typeof fs = jest.requireActual('fs');
+      const rmSync = realFs.rmSync;
+      const spy = jest.spyOn(realFs, 'rmSync').mockImplementation((target, options) => {
+        if (path.basename(String(target)) === 'node_modules') {
+          throw Object.assign(new Error('ENOTEMPTY: directory not empty, rmdir \'node_modules/.bin\''), { code: 'ENOTEMPTY' });
+        }
+        rmSync(target, options);
+      });
+      const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_example-1.0.0' })));
+
+      try {
+        const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+        expect(result.status).toBe('produced');
+        expect(result.warnings).toEqual([
+          'module-descriptor.json was generated during this evaluation; it is not committed to the repository.',
+          'The evaluator could not remove node_modules, which it created while generating the descriptor: ENOTEMPTY: directory not empty, rmdir \'node_modules/.bin\''
+        ]);
+        expect(spy).toHaveBeenCalledWith(path.join(repo, 'node_modules'), { recursive: true, force: true, maxRetries: 3 });
+        expect(fs.readdirSync(repo).sort()).toEqual(['node_modules', 'package.json']);
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('should reject an empty descriptor left by a script that exited successfully', async () => {
@@ -349,7 +450,7 @@ describe('module-descriptor-artifact', () => {
       const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
 
       expect(result.status).toBe('missing');
-      expect(result.errors).toEqual(['The build-mod-descriptor script ran, but it did not create ModuleDescriptor.json or module-descriptor.json at the repository root.']);
+      expect(result.errors).toEqual(['The build-mod-descriptor script ran, but it did not write ModuleDescriptor.json or module-descriptor.json at the repository root.']);
     });
 
     it('should not run the script when the install was blocked or failed', async () => {

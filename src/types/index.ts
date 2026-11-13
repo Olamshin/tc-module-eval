@@ -107,6 +107,8 @@ export interface CommandExecutionResult {
 export interface CommandRunner {
   run(request: CommandExecutionRequest, evaluationRun?: EvaluationRun): Promise<CommandExecutionResult>;
   normalize(request: CommandExecutionRequest): string;
+  /** False when `run` would block the request because of its isolation or network policy; absent means unknown. */
+  canRun?(request: CommandExecutionRequest): boolean;
 }
 
 export interface ModuleDescriptorArtifact {
@@ -120,7 +122,10 @@ export interface ModuleDescriptorArtifact {
     | 'command-failed';
   strategy?: 'maven-generation' | 'gradle-generation' | 'frontend-script' | 'static-root';
   descriptorPath?: string;
+  /** Absent when the file was generated and has since been removed; `content` or `readError` then holds what was read. */
   absolutePath?: string;
+  content?: string;
+  readError?: string;
   /** The package.json script that generates the descriptor, for the frontend-script strategy. */
   descriptorScript?: string;
   /** The dependency install the descriptor script needs; when it did not succeed, `command` is absent. */

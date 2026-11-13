@@ -113,15 +113,21 @@ export abstract class SharedEvaluator extends CatalogSectionEvaluator {
       return s002ArtifactFailureResult(artifact);
     }
 
-    if (!artifact.absolutePath || !artifact.descriptorPath) {
+    if (artifact.readError !== undefined) {
+      return s002ReadFailureResult(artifact, artifact.readError);
+    }
+
+    if (!artifact.descriptorPath || (artifact.content === undefined && !artifact.absolutePath)) {
       return s002MissingPathResult(artifact);
     }
 
-    let descriptorContent: string;
-    try {
-      descriptorContent = fs.readFileSync(artifact.absolutePath, 'utf-8');
-    } catch (error) {
-      return s002ReadFailureResult(artifact, errorMessage(error));
+    let descriptorContent = artifact.content;
+    if (descriptorContent === undefined) {
+      try {
+        descriptorContent = fs.readFileSync(artifact.absolutePath!, 'utf-8');
+      } catch (error) {
+        return s002ReadFailureResult(artifact, errorMessage(error));
+      }
     }
 
     return s002ValidationResult(artifact, validateModuleDescriptorJson(descriptorContent));
