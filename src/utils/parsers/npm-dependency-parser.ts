@@ -272,7 +272,6 @@ export async function getNpmDependencies(
 
     // Use npx with pinned version to ensure consistency across environments
     getLogger().info('Running license-checker-rseidelsohn...');
-    // Outside the repository, which later criteria scan.
     const npmToolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'folio-eval-npm-'));
     let checkerResult: CommandExecutionResult;
     try {
