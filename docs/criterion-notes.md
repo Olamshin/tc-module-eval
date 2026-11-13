@@ -44,7 +44,7 @@ A Gradle build is found at the repository root or in `service/`, where FOLIO's G
 
 ## Source Inspection Boundaries
 
-Source inspection never modifies evaluated repositories or runs their code, tests, builds, services, databases, or Okapi calls. `--allow-local-commands` allows the build commands described for each criterion, and with `--allow-runtime-checks` also the [backend runtime harness](#backend-runtime-harness), which builds the module and runs it in Docker.
+Source inspection never modifies evaluated repositories or runs their code, tests, builds, services, databases, or Okapi calls. `--allow-local-commands` allows the build commands described for each criterion, and with `--allow-runtime-checks` also the [backend runtime harness](#backend-runtime-harness), which builds the module and runs it in Docker. Those commands write their usual output into the clone (`.npmrc`, `node_modules/`, `target/`, `build/`), which the criteria after them may see; the npm cache and the tools `npx` installs go to a temporary folder outside the clone, removed afterwards.
 
 ## S003 Third-Party Licenses
 
