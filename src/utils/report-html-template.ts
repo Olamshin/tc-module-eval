@@ -71,6 +71,7 @@ export function createHtmlReport(result: EvaluationResult): string {
     var groupDefs = [
       {key:'review',title:'Needs review',note:'Automated checks ran and produced findings for a reviewer to judge.'},
       {key:'passed',title:'Passed',note:''},
+      {key:'not-applicable',title:'Not applicable',note:'These criteria do not apply to this repository.'},
       {key:'human',title:'No automated check',note:'Each of these requires evaluation by a human reviewer.'}
     ];
     var state = {filter:'all',query:'',cards:{},nodes:{},clamps:{},groups:{},notes:{},focus:null,keyboard:false};
