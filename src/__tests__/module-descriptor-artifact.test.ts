@@ -8,7 +8,9 @@ import {
   EvaluationRun
 } from '../types';
 import { produceModuleDescriptorArtifact } from '../utils/artifacts/module-descriptor-artifact';
+import { NPM_NETWORK_POLICY } from '../utils/build-tool-policies';
 import { createEvaluationRun } from '../utils/evaluation-run';
+import { NoopLogger, resetLogger, setLogger } from '../utils/logger';
 
 class FakeRunner implements CommandRunner {
   calls: CommandExecutionRequest[] = [];
@@ -246,5 +248,124 @@ describe('module-descriptor-artifact', () => {
     expect(second.status).toBe('produced');
     expect(runner.calls).toHaveLength(2);
     expect(run.commandObservations.size).toBe(1);
+  });
+
+  describe('Stripes descriptor script', () => {
+    const installArgs = ['install', '--ignore-scripts', '--ignore-engines', '--pure-lockfile'];
+
+    beforeEach(() => setLogger(new NoopLogger()));
+    afterEach(() => resetLogger());
+
+    function stripesRepo(): string {
+      const repo = tempRepo();
+      fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({
+        name: '@folio/ui-example',
+        scripts: { 'build-mod-descriptor': 'stripes mod descriptor --full | jq \'.[]\' > module-descriptor.json' },
+        devDependencies: { '@folio/stripes-cli': '^3.0.0' }
+      }));
+      return repo;
+    }
+
+    function scriptRunner(repo: string, writeOutput: () => void, installStatus: CommandExecutionResult['status'] = 'success'): FakeRunner {
+      return new FakeRunner(request => {
+        if (request.args?.[0] === 'install') {
+          if (installStatus === 'success') {
+            fs.mkdirSync(path.join(repo, 'node_modules', '.bin'), { recursive: true });
+            fs.writeFileSync(path.join(repo, 'node_modules', '.bin', 'stripes'), '');
+          }
+          return commandResult(request, installStatus);
+        }
+        writeOutput();
+        return commandResult(request);
+      });
+    }
+
+    it('should install dependencies, devDependencies included and lifecycle scripts off, before the script and remove the install afterwards', async () => {
+      const repo = stripesRepo();
+      const seenByScript: string[] = [];
+      const runner = scriptRunner(repo, () => {
+        seenByScript.push(fs.readFileSync(path.join(repo, '.npmrc'), 'utf-8'));
+        seenByScript.push(`stripes installed: ${fs.existsSync(path.join(repo, 'node_modules', '.bin', 'stripes'))}`);
+        fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_example-1.0.0' }));
+      });
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(runner.calls).toEqual([
+        { command: 'yarn', args: installArgs, cwd: repo, timeoutMs: 300000, maxOutputBytes: 65536, requiresIsolation: true, networkPolicy: NPM_NETWORK_POLICY },
+        { command: 'yarn', args: ['run', 'build-mod-descriptor'], cwd: repo, timeoutMs: 180000, maxOutputBytes: 65536, requiresIsolation: true, networkPolicy: NPM_NETWORK_POLICY }
+      ]);
+      expect(seenByScript).toEqual(['@folio:registry=https://repository.folio.org/repository/npm-folio\n', 'stripes installed: true']);
+      expect(result.status).toBe('produced');
+      expect(result.descriptorScript).toBe('build-mod-descriptor');
+      expect(result.installCommand?.args).toEqual(installArgs);
+      expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, '.npmrc'))).toBe(false);
+    });
+
+    it('should keep a node_modules directory and .npmrc that were there before', async () => {
+      const repo = stripesRepo();
+      fs.mkdirSync(path.join(repo, 'node_modules'));
+      fs.writeFileSync(path.join(repo, '.npmrc'), 'registry=https://registry.npmjs.org/\n');
+      const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_example-1.0.0' })));
+
+      await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(fs.existsSync(path.join(repo, 'node_modules', '.bin', 'stripes'))).toBe(true);
+      expect(fs.readFileSync(path.join(repo, '.npmrc'), 'utf-8')).toBe('registry=https://registry.npmjs.org/\n');
+    });
+
+    it('should accept module-descriptor.json and prefer the file the script wrote over a committed ModuleDescriptor.json', async () => {
+      const repo = stripesRepo();
+      fs.writeFileSync(path.join(repo, 'ModuleDescriptor.json'), JSON.stringify({ id: 'folio_stale-0.1.0' }));
+      const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'module-descriptor.json'), JSON.stringify({ id: 'folio_example-1.0.0' })));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('produced');
+      expect(result.descriptorPath).toBe('module-descriptor.json');
+      expect(result.absolutePath).toBe(path.join(repo, 'module-descriptor.json'));
+      expect(result.warnings).toEqual(['module-descriptor.json was generated during this evaluation; it is not committed to the repository.']);
+    });
+
+    it('should reject an empty descriptor left by a script that exited successfully', async () => {
+      const repo = stripesRepo();
+      const runner = scriptRunner(repo, () => fs.writeFileSync(path.join(repo, 'module-descriptor.json'), '\n'));
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('invalid-candidate');
+      expect(result.descriptorPath).toBe('module-descriptor.json');
+      expect(result.absolutePath).toBeUndefined();
+      expect(result.errors).toEqual([
+        'The build-mod-descriptor script exited successfully, but the module-descriptor.json it left at the repository root is empty; a command earlier in the script may have failed without failing the script.'
+      ]);
+    });
+
+    it('should report a missing descriptor under both accepted names', async () => {
+      const repo = stripesRepo();
+      const runner = scriptRunner(repo, () => undefined);
+
+      const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+      expect(result.status).toBe('missing');
+      expect(result.errors).toEqual(['The build-mod-descriptor script ran, but it did not create ModuleDescriptor.json or module-descriptor.json at the repository root.']);
+    });
+
+    it('should not run the script when the install was blocked or failed', async () => {
+      for (const [installStatus, artifactStatus] of [['blocked', 'unsafe-to-run'], ['failed', 'command-failed']] as const) {
+        const repo = stripesRepo();
+        const runner = scriptRunner(repo, () => undefined, installStatus);
+
+        const result = await produceModuleDescriptorArtifact(repo, undefined, runner);
+
+        expect(runner.calls.map(call => call.args)).toEqual([installArgs]);
+        expect(result.status).toBe(artifactStatus);
+        expect(result.installCommand?.status).toBe(installStatus);
+        expect(result.command).toBeUndefined();
+        expect(result.errors).toEqual([installStatus]);
+        expect(fs.existsSync(path.join(repo, '.npmrc'))).toBe(false);
+      }
+    });
   });
 });

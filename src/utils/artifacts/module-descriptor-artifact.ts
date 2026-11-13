@@ -12,10 +12,13 @@ import { GRADLE_NETWORK_POLICY, MAVEN_NETWORK_POLICY, NPM_NETWORK_POLICY } from 
 import { defaultCommandRunner } from '../command-runner';
 import { hasMavenProject } from '../parsers/maven-dependency-parser';
 import { findGradleProjectDir, getGradleCommand } from '../parsers/gradle-dependency-parser';
+import { writeFolioNpmrcIfMissing } from '../parsers/npm-dependency-parser';
 import { validateRepoPath } from '../parsers/common';
 import { findCandidateFiles, isWithinRepo, relativePosixPath, walkDirectories } from '../repo-files';
 
 const DESCRIPTOR_NAME = 'ModuleDescriptor.json';
+// Stripes modules usually redirect `stripes mod descriptor` output to module-descriptor.json.
+const FRONTEND_DESCRIPTOR_NAMES = [DESCRIPTOR_NAME, 'module-descriptor.json'];
 export const FRONTEND_DESCRIPTOR_SCRIPTS = ['build-mod-descriptor', 'build-module-descriptor', 'generate-module-descriptor'];
 
 export async function produceModuleDescriptorArtifact(
@@ -128,13 +131,50 @@ async function runBuildDescriptorStrategy(
   return selectedArtifact(repoPath, selected, strategy, command, before);
 }
 
+// The install and its .npmrc are removed afterwards, so S003's own production-only install starts from the same checkout.
 async function runFrontendDescriptorStrategy(
   repoPath: string,
   scriptName: string,
   evaluationRun: EvaluationRun | undefined,
   commandRunner: CommandRunner
 ): Promise<ModuleDescriptorArtifact> {
-  const before = snapshotRootDescriptorPath(repoPath);
+  const nodeModules = path.join(repoPath, 'node_modules');
+  const hadNodeModules = pathExists(nodeModules);
+  const wroteNpmrc = writeFolioNpmrcIfMissing(repoPath);
+  try {
+    return await generateFrontendDescriptor(repoPath, scriptName, evaluationRun, commandRunner);
+  } finally {
+    if (!hadNodeModules) {
+      fs.rmSync(nodeModules, { recursive: true, force: true });
+    }
+    if (wroteNpmrc) {
+      fs.rmSync(path.join(repoPath, '.npmrc'), { force: true });
+    }
+  }
+}
+
+async function generateFrontendDescriptor(
+  repoPath: string,
+  scriptName: string,
+  evaluationRun: EvaluationRun | undefined,
+  commandRunner: CommandRunner
+): Promise<ModuleDescriptorArtifact> {
+  const before = snapshotRootDescriptors(repoPath);
+  // Descriptor scripts call the Stripes CLI, a devDependency, so devDependencies are installed too.
+  const installCommand = await commandRunner.run({
+    command: 'yarn',
+    args: ['install', '--ignore-scripts', '--ignore-engines', '--pure-lockfile'],
+    cwd: repoPath,
+    timeoutMs: 300000,
+    maxOutputBytes: 64 * 1024,
+    requiresIsolation: true,
+    networkPolicy: NPM_NETWORK_POLICY
+  }, evaluationRun);
+  const source = { strategy: 'frontend-script' as const, descriptorScript: scriptName, installCommand };
+  if (installCommand.status !== 'success') {
+    return commandProblemArtifact(installCommand, source, `Installing the dependencies of the ${scriptName} script`);
+  }
+
   const command = await commandRunner.run({
     command: 'yarn',
     args: ['run', scriptName],
@@ -144,33 +184,43 @@ async function runFrontendDescriptorStrategy(
     requiresIsolation: true,
     networkPolicy: NPM_NETWORK_POLICY
   }, evaluationRun);
-
-  if (command.status === 'blocked') {
-    return artifact('unsafe-to-run', {
-      strategy: 'frontend-script',
-      command,
-      errors: [command.errorMessage ?? 'Frontend descriptor generation was blocked']
-    });
-  }
-
   if (command.status !== 'success') {
-    return artifact('command-failed', {
-      strategy: 'frontend-script',
-      command,
-      errors: [command.errorMessage ?? `Frontend descriptor generation ${command.status}`]
-    });
+    return commandProblemArtifact(command, { ...source, command }, 'Frontend descriptor generation');
   }
 
-  const rootDescriptor = path.join(repoPath, DESCRIPTOR_NAME);
-  if (!isSafeFinalDescriptor(repoPath, rootDescriptor) || !fs.existsSync(rootDescriptor)) {
+  const written = FRONTEND_DESCRIPTOR_NAMES
+    .map(name => path.join(repoPath, name))
+    .filter(candidate => fs.existsSync(candidate) && isSafeFinalDescriptor(repoPath, candidate));
+  const selected = written.find(candidate => before.get(path.basename(candidate)) !== modifiedTime(candidate)) ?? written[0];
+  if (!selected) {
     return artifact('missing', {
-      strategy: 'frontend-script',
+      ...source,
       command,
-      errors: [`The ${scriptName} script ran, but it did not create ${DESCRIPTOR_NAME} at the repository root.`]
+      errors: [`The ${scriptName} script ran, but it did not create ${FRONTEND_DESCRIPTOR_NAMES.join(' or ')} at the repository root.`]
     });
   }
 
-  return selectedArtifact(repoPath, rootDescriptor, 'frontend-script', command, before);
+  if (fs.readFileSync(selected, 'utf-8').trim() === '') {
+    const name = path.basename(selected);
+    return artifact('invalid-candidate', {
+      ...source,
+      command,
+      descriptorPath: name,
+      errors: [`The ${scriptName} script exited successfully, but the ${name} it left at the repository root is empty; a command earlier in the script may have failed without failing the script.`]
+    });
+  }
+
+  return { ...selectedArtifact(repoPath, selected, 'frontend-script', command, new Set(before.keys())), descriptorScript: scriptName, installCommand };
+}
+
+function commandProblemArtifact(
+  command: CommandExecutionResult,
+  values: Partial<ModuleDescriptorArtifact>,
+  action: string
+): ModuleDescriptorArtifact {
+  return command.status === 'blocked'
+    ? artifact('unsafe-to-run', { ...values, errors: [command.errorMessage ?? `${action} was blocked`] })
+    : artifact('command-failed', { ...values, errors: [command.errorMessage ?? `${action} ${command.status}`] });
 }
 
 function discoverStaticRootDescriptor(repoPath: string): ModuleDescriptorArtifact {
@@ -319,11 +369,28 @@ function isDescriptorTemplateName(fileName: string): boolean {
   return /moduledescriptor.*\.json$/i.test(fileName);
 }
 
-function snapshotRootDescriptorPath(repoPath: string): Set<string> {
-  const rootDescriptor = path.join(repoPath, DESCRIPTOR_NAME);
-  return fs.existsSync(rootDescriptor) && isSafeFinalDescriptor(repoPath, rootDescriptor)
-    ? new Set([DESCRIPTOR_NAME])
-    : new Set();
+function snapshotRootDescriptors(repoPath: string): Map<string, number> {
+  const snapshot = new Map<string, number>();
+  for (const name of FRONTEND_DESCRIPTOR_NAMES) {
+    const candidate = path.join(repoPath, name);
+    if (fs.existsSync(candidate) && isSafeFinalDescriptor(repoPath, candidate)) {
+      snapshot.set(name, modifiedTime(candidate));
+    }
+  }
+  return snapshot;
+}
+
+function modifiedTime(candidatePath: string): number {
+  return fs.statSync(candidatePath).mtimeMs;
+}
+
+function pathExists(candidatePath: string): boolean {
+  try {
+    fs.lstatSync(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function relative(repoPath: string, candidatePath: string): string {
@@ -339,6 +406,8 @@ function artifact(
     strategy: values.strategy,
     descriptorPath: values.descriptorPath,
     absolutePath: values.absolutePath,
+    descriptorScript: values.descriptorScript,
+    installCommand: values.installCommand,
     command: values.command,
     warnings: values.warnings ?? [],
     errors: values.errors ?? []
