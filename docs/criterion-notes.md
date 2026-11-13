@@ -735,7 +735,7 @@ With `--allow-runtime-checks`, the [backend runtime harness](#backend-runtime-ha
 
 - `pass` (basis `runtime-200`): `GET /admin/health` answered 200. The mechanisms the committed files show are still listed.
 - `manual` (basis `runtime-not-200`): any other answer, or none before the time ran out, with the response body. The harness starts no more than an Okapi stub, PostgreSQL and Kafka beside the module, so a module that reports other dependencies as down may still be healthy in a full deployment. The checklist adds B014-C2: `GET /admin/health` returns 200 once the module's dependencies are available, starting from each mechanism found. B014 never fails on a runtime answer.
-- When the module never reached the health check (the harness did not run, the build failed, or the module did not start or stopped running), the result from the committed files stands, and the report says why the runtime check did not decide it. A shared library and a repository not known to be a module keep their result.
+- When the module never reached the health check (the harness did not run, the build failed, or the module did not start), or stopped running during it, the result from the committed files stands, and the report says why the runtime check did not decide it, with any answer the health check got before the module stopped (`endpointCalled` false). A shared library and a repository not known to be a module keep their result.
 
 ## B015 High Availability
 
