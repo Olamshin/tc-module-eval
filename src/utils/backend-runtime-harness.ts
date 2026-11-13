@@ -594,10 +594,10 @@ export class DockerBackendRuntimeHarness implements BackendRuntimeHarness {
       if (!output?.health) break;
       health = output.health;
       attempts += output.health.attempts;
-      evidence.health = { ...health, attempts, waitedMs: this.now() - healthStarted };
       const state = await this.inspectModule(context, moduleName, moduleImage, port);
       evidence.module = { ...evidence.module, running: state.running, ...(state.exitCode !== undefined ? { exitCode: state.exitCode } : {}), ...(state.oomKilled ? { oomKilled: true } : {}) };
       if (!state.running) {
+        evidence.health = { ...health, attempts, waitedMs: this.now() - healthStarted };
         throw new Stop('start-failed', `the module container stopped running (exit code ${state.exitCode ?? 'unknown'}${state.oomKilled ? ', out of memory' : ''})`);
       }
       if (health?.status === 200) break;
