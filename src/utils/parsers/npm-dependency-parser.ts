@@ -255,10 +255,11 @@ export async function getNpmDependencies(
     // --ignore-engines bypasses Node.js engine compatibility checks that can cause
     // failures when transitive dependencies require newer Node versions (e.g., @formatjs/cli
     // requiring Node >= 20). Engine compat is irrelevant for license extraction.
+    // --pure-lockfile keeps yarn from writing a yarn.lock that other criteria would read as committed.
     getLogger().info('Running yarn install...');
     const installResult = await commandRunner.run({
       command: 'yarn',
-      args: ['install', '--production', '--ignore-scripts', '--ignore-engines'],
+      args: ['install', '--production', '--ignore-scripts', '--ignore-engines', '--pure-lockfile'],
       cwd: validatedPath,
       timeoutMs: INSTALL_TIMEOUT,
       requiresIsolation: true,
