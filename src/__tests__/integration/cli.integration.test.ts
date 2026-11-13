@@ -612,7 +612,7 @@ describe('CLI Integration Tests', () => {
       const htmlContent = await fs.readFile(reportPaths.htmlPath!, 'utf-8');
       expect(htmlContent).toContain('\\u003cscript\\u003ealert');
       expect(htmlContent).not.toContain('<script>alert("x")</script>');
-      expect(embeddedReportData(htmlContent).items[0].details.join('\n')).toContain('<script>alert("x")</script>');
+      expect(embeddedReportData(htmlContent).items[0].tree[0].children[0]).toEqual({ kind: 'row', text: '<script>alert("x")</script>', children: [] });
     });
   });
 
@@ -695,7 +695,8 @@ describe('CLI Integration Tests', () => {
       const htmlContent = await fs.readFile(reportPaths.htmlPath!, 'utf-8');
       expect(htmlContent).toContain('\\u003cscript\\u003ealert');
       expect(htmlContent).not.toContain('<script>alert("x")</script>');
-      expect(embeddedReportData(htmlContent).items[0].details.join('\n')).toContain('<script>alert("x")</script>');
+      expect(embeddedReportData(htmlContent).items[0].tree[0].children[0]).toEqual({ kind: 'row', lead: 'README.md', tag: 'config',
+        text: '<script>alert("x")</script> token=abc123', children: [] });
     });
   });
 

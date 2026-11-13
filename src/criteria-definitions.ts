@@ -29,7 +29,7 @@ export interface AcceptanceCriterionDefinition extends CriterionDefinition {
   defaultEvaluation?: CriterionDefaultEvaluation;
 }
 
-const HUMAN_REVIEW_DETAILS = 'This criterion requires manual evaluation by a human reviewer';
+export const HUMAN_REVIEW_DETAILS = 'This criterion requires manual evaluation by a human reviewer';
 
 /**
  * Complete catalog of all FOLIO technical council acceptance criteria.

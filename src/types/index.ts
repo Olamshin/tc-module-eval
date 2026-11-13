@@ -242,6 +242,7 @@ export * from './ui-runtime-evidence';
 export * from './backend-evidence';
 export * from './b009-api-tests';
 export * from './backend-runtime-evidence';
+export * from './report-presentation';
 
 export type ModuleKind = 'backend-module' | 'ui-module' | 'library' | 'ambiguous';
 
