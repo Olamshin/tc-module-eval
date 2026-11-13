@@ -184,7 +184,7 @@ an exception or connect timeout alone does not prove a bounded failure path.
   outage also fails.
 - `manual`: applicability, discovery, dependency ownership, bounds, fallback, startup,
   readiness, or another material semantic fact remains unresolved.
-- `not_applicable`: the repository is explicitly identified as a FOLIO library.
+- `not_applicable`: the repository is a FOLIO library, classified as S004 and S008 classify it: an allowlisted library name, or a Stripes package whose `stripes.actsAs` names no role (stripes-acq-components).
 
 Optional dependencies may use feature isolation or controlled module-wide degradation,
 but loss must remain bounded and must not make the module unready. Tests strengthen

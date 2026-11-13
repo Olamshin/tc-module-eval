@@ -50,6 +50,23 @@ describe('S010 shared evaluator integration', () => {
     expect(result.status).toBe(EvaluationStatus.NOT_APPLICABLE);
   });
 
+  it('returns not applicable for a Stripes library, classified as S004 and S008 classify it', async () => {
+    await fs.outputJson(path.join(repo, 'package.json'), {
+      name: '@folio/stripes-acq-components',
+      dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' },
+      stripes: { actsAs: [''] }
+    });
+    await fs.outputFile(path.join(repo, 'lib/useFunds.js'), 'export const useFunds = ky => ky.get("finance/funds");\n');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repo });
+    const run = createEvaluationRun({ repositoryPath: repo, language: 'javascript', criteriaFilter: ['S010'] });
+
+    const result = await new TestEvaluator('javascript').evaluateCriterion('S010', repo, run);
+
+    expect(result.status).toBe(EvaluationStatus.NOT_APPLICABLE);
+    expect((result.criterionDetails as S010Analysis).evidence.moduleKind).toEqual(run.artifacts.moduleKind);
+  });
+
   it('returns manual for unsupported general Node runtime', async () => {
     await fs.outputJson(path.join(repo, 'package.json'), { name: 'mod-node', dependencies: { express: '4.0.0' } });
     execFileSync('git', ['add', '.'], { cwd: repo });
