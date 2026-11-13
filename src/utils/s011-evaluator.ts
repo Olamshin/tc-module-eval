@@ -115,7 +115,10 @@ export function evaluateS011(inputs: S011Inputs): S011Analysis {
   }
   const freshness = sonarSnapshotFreshness(snapshot, inputs.repositoryCommit);
   if (!freshness.fresh) {
-    return result(EvaluationStatus.MANUAL, `${reportText(freshness.message)} Rerun once SonarCloud has analysed the evaluated commit, or check SonarCloud by hand.${local}`, 'stale-analysis');
+    const next = freshness.reason === 'short-branch'
+      ? `A reviewer needs to check the module's issues and hotspots in SonarCloud (${key}).`
+      : 'Rerun once SonarCloud has analysed the evaluated commit, or check SonarCloud by hand.';
+    return result(EvaluationStatus.MANUAL, `${reportText(freshness.message)} ${next}${local}`, 'stale-analysis');
   }
 
   // Each fail rule is judged from its own evidence, whatever else could not be read.
