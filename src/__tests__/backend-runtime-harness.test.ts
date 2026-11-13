@@ -505,6 +505,7 @@ describe('backend runtime harness isolation rules', () => {
     const { evidence } = await collect(docker);
     expect(evidence.outcome).toBe('start-failed');
     expect(evidence.problem).toBe('the module container stopped running (exit code 137, out of memory)');
+    expect(evidence.health).toEqual({ method: 'GET', path: '/admin/health', status: 200, body: '{"status":"UP"}', attempts: 1, waitedMs: 0 });
   });
 });
 
@@ -701,6 +702,24 @@ describe('backend runtime evidence in the evaluation', () => {
     expect([analysis.status, analysis.basis]).toEqual([EvaluationStatus.PASS, 'runtime-200']);
     const noContent = await evaluate<B014Analysis>('B014', moduleRepository(), new CannedHarness({ health: health(204) }));
     expect([noContent.analysis.status, noContent.analysis.basis]).toEqual([EvaluationStatus.MANUAL, 'runtime-not-200']);
+  });
+
+  it('keeps B014\'s static result, and shows the health answers, when the module stopped running during its health check', async () => {
+    const root = moduleRepository({ 'pom.xml': pom('mod-example', restVerticleBuild) });
+    const without = await evaluate<B014Analysis>('B014', root);
+    const { result, analysis, lines } = await evaluate<B014Analysis>('B014', root, new CannedHarness({ outcome: 'start-failed',
+      problem: 'the module container stopped running (exit code 137)', health: health(200), module: { running: false } as BackendRuntimeEvidence['module'] }));
+    expect([result.status, analysis.basis, analysis.endpointCalled]).toEqual([EvaluationStatus.PASS, 'mechanism-found', false]);
+    expect(result.evidence).toBe('B014 pass: RMB\'s RestVerticle, the main verticle in pom.xml:1, serves GET /admin/health. '
+      + 'The module stopped running in Docker during its health check, so the result comes from the committed files.');
+    expect(lines.slice(0, 5)).toEqual([
+      'Health check: GET /admin/health was called, but the result comes from the committed files',
+      'What to do: Nothing; the module has a mechanism that serves GET /admin/health.',
+      'Runtime check:',
+      '  - GET /admin/health answered 200 after 3 attempts over 42 s',
+      '  - The module did not start in Docker: the module container stopped running (exit code 137); the result comes from the committed files'
+    ]);
+    expect(lines.slice(5)).toEqual(without.lines.slice(2));
   });
 
   it.each([
