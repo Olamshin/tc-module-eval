@@ -425,7 +425,7 @@ describe('B014 health check endpoint', () => {
   it('reads a setting name only where it starts, not inside a file name such as mod-serials-management.war', async () => {
     const { analysis } = await b014(springModule({
       [YML]: ADMIN_YAML,
-      Dockerfile: 'FROM eclipse-temurin:21\nCOPY service/build/libs/mod-serials-management.war /app/\n'
+      Dockerfile: 'FROM eclipse-temurin:21\nCOPY service/build/libs/mod-serials-management.war service/build/libs/x--management.war /app/\n'
         + 'ENTRYPOINT ["java", "-jar", "/app/mod-serials-management.war", "--management.server.port=9090"]\n'
     }));
 
