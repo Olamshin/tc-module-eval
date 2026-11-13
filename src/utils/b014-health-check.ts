@@ -14,7 +14,7 @@ import {
 import { CommittedSourceDiagnostic, CommittedSourceFile } from './committed-source';
 import { REST_VERTICLE, SOURCE_FILE } from './backend-evidence';
 import { HEALTH_ROUTE, lineCounter, sourceRoutes, withoutComments } from './backend-routes';
-import { runtimeDockerLines, runtimeOutcomeText, runtimeSummary } from './backend-runtime-harness';
+import { runtimeBuildOutputLines, runtimeDockerLines, runtimeOutcomeText, runtimeSummary } from './backend-runtime-harness';
 import { frontendChecklist, renderFrontendChecklistLines } from './frontend-checklist';
 import { count, listText, overflowLine, reportPath, reportText } from './report-text';
 
@@ -232,9 +232,9 @@ const WHAT_TO_DO: Record<B014Basis, string> = {
 function runtimeLines(runtime: B014Runtime | undefined): string[] {
   if (!runtime) return [];
   const health = runtime.health;
-  return ['Runtime check:', ...runtimeDockerLines(runtime.docker, runtime.cleanup), health
-    ? `  - GET ${HEALTH_ROUTE} ${healthAnswer(health)} after ${count(health.attempts, 'attempt')} over ${Math.round(health.waitedMs / 1000)} s${health.status !== 200 && health.body ? `: ${reportText(health.body)}` : ''}`
-    : `  - ${runtimeOutcomeText(runtime.outcome, runtime.problem)}; the result comes from the committed files`];
+  return ['Runtime check:', ...runtimeDockerLines(runtime.docker, runtime.cleanup), ...health
+    ? [`  - GET ${HEALTH_ROUTE} ${healthAnswer(health)} after ${count(health.attempts, 'attempt')} over ${Math.round(health.waitedMs / 1000)} s${health.status !== 200 && health.body ? `: ${reportText(health.body)}` : ''}`]
+    : [`  - ${runtimeOutcomeText(runtime.outcome, runtime.problem)}; the result comes from the committed files`, ...runtimeBuildOutputLines(runtime)]];
 }
 
 function healthAnswer(health: NonNullable<B014Runtime['health']>): string {

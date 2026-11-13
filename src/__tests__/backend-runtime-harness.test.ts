@@ -578,6 +578,19 @@ describe('backend runtime evidence in the evaluation', () => {
     expect(lines.slice(at, at + 2)).toEqual(['Runtime evidence (informational; it does not change the status):', row]);
   });
 
+  it('shows the last 20 lines of a failed build under the outcome in every runtime section', async () => {
+    const output = [...Array.from({ length: 23 }, (_, index) => `[INFO] line ${index + 1}`), '', '[ERROR] Failed\rto compile'].join('\n');
+    const harness = new CannedHarness({ outcome: 'build-failed', problem: 'the build exited with 1', buildOutput: output });
+    const tail = Array.from({ length: 19 }, (_, index) => `    - [INFO] line ${index + 5}`).concat('    - [ERROR] Failed ↵ to compile');
+    const { result, analysis } = await b003(moduleRepository(), harness);
+    expect(analysis.runtime!.buildOutput!.split('\n')).toHaveLength(20);
+    expect(section(result.details!.split('\n'), RUNTIME)).toEqual([RUNTIME, '  - The module could not be built in Docker: the build exited with 1',
+      '  - The end of the build output:', ...tail]);
+    const b014 = await evaluate<B014Analysis>('B014', moduleRepository({ 'pom.xml': pom('mod-example', restVerticleBuild) }), harness);
+    expect(section(b014.lines, 'Runtime check:')).toEqual(['Runtime check:',
+      '  - The module could not be built in Docker: the build exited with 1; the result comes from the committed files', '  - The end of the build output:', ...tail]);
+  });
+
   async function evaluate<T>(criterionId: string, root: string, backendRuntime?: BackendRuntimeHarness) {
     const result = await new BackendEvaluator().evaluateCriterion(criterionId, root, createEvaluationRun({ repositoryPath: root, language: 'java', backendRuntime }));
     return { result, analysis: result.criterionDetails as T, lines: result.details!.split('\n') };
