@@ -184,6 +184,7 @@ function formatBuildErrorLines(artifact: ModuleDescriptorArtifact): string[] {
   if (!output.length) {
     return [];
   }
+  // module-descriptor-artifact.ts runs Maven with keepStdoutTail, so only a cut to any other stream loses the end of the build.
   const cutOff = Boolean((!maven && command?.stdoutTruncated) || command?.stderrTruncated);
 
   // The end of the output usually holds the actual failure.
@@ -193,7 +194,6 @@ function formatBuildErrorLines(artifact: ModuleDescriptorArtifact): string[] {
   const shown = (errorLines.length ? errorLines : tail).map(line =>
     line.length > MAX_BUILD_ERROR_LINE_LENGTH ? `${line.slice(0, MAX_BUILD_ERROR_LINE_LENGTH)}… (line shortened)` : line
   );
-  // The runner keeps the start of each stream but Maven's stdout, so when it cut one off, the true end of the build is missing.
   const cutOffNote = 'the build printed more than the evaluator keeps, so the final lines are missing';
   const heading = errorLines.length
     ? cutOff
