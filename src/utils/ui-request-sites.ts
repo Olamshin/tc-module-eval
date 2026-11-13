@@ -25,8 +25,8 @@ type Resolved =
 
 /**
  * Every request a UI package's production code sends to the backend: stripes-connect manifest resources of type
- * `okapi` (`path` and per-method `path`), calls on a ky instance (`useOkapiKy()`, a variable named `ky`, and
- * `.extend({ prefixUrl })` of one), and `fetch` on the Okapi URL. A path may be a string or template literal, a
+ * `okapi` (`path` and per-method `path`) and the `path` a resource mutator passes to `GET`, calls on a ky instance
+ * (`useOkapiKy()`, a variable named `ky`, and `.extend({ prefixUrl })` of one), and `fetch` on the Okapi URL. A path may be a string or template literal, a
  * concatenation, or a constant, object property or one-expression function from the same file or a relative import
  * inside the production source; segments the code fills in at run time become `{}`, and the query string is dropped.
  */
@@ -81,7 +81,11 @@ class PathResolver {
       if (ts.isCallExpression(node)) {
         const callee = node.expression;
         const [first, options] = node.arguments;
-        if (ts.isPropertyAccessExpression(callee) && KY_METHODS.has(callee.name.text)) {
+        if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'GET' && isMutatorResource(callee.expression)) {
+          const getOptions = first && unwrap(first);
+          const path = getOptions && ts.isObjectLiteralExpression(getOptions) ? property(getOptions, 'path') : undefined;
+          if (path) add(node, 'stripes-connect', 'GET', path);
+        } else if (ts.isPropertyAccessExpression(callee) && KY_METHODS.has(callee.name.text)) {
           const prefix = this.kyPrefix(callee.expression, file, 0);
           if (prefix) add(node, 'ky', callee.name.text.toUpperCase(), first, prefix);
         } else if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'extend') {
@@ -365,6 +369,13 @@ function property(object: ts.ObjectLiteralExpression, name: string): ts.Expressi
     if (ts.isShorthandPropertyAssignment(item)) return item.name;
   }
   return undefined;
+}
+
+function isMutatorResource(expression: ts.Expression): boolean {
+  const resource = unwrap(expression);
+  if (!ts.isPropertyAccessExpression(resource)) return false;
+  const owner = unwrap(resource.expression);
+  return (ts.isIdentifier(owner) ? owner.text : ts.isPropertyAccessExpression(owner) ? owner.name.text : undefined) === 'mutator';
 }
 
 function isOkapiResource(object: ts.ObjectLiteralExpression): boolean {
