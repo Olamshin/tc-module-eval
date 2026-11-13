@@ -468,23 +468,24 @@ const userBarcode = patron.barcode;
   it('keeps a JDWP debug address context-only and does not count the loan-types interface as a loan', () => {
     const repoPath = createTempRepo();
     writeRepoFile(repoPath, 'ramls/loan-type.raml', '/loan-types:\n  /{loantypeId}:\n/loan-storage/loans:\n');
-    writeRepoFile(repoPath, 'src/main/resources/application.yml', 'java-options: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005\n');
+    writeRepoFile(repoPath, 'src/main/resources/application.yml', 'java-options: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005\nlegacy-options: -Xrunjdwp:transport=dt_socket,server=y,address=5005\n');
 
     const result = gatherS005PersonalDataEvidence(repoPath);
     expect(result.signals.filter(signal => ['address', 'circulation_transactions'].includes(signal.category))
       .map(signal => [signal.path, signal.line, signal.category, signal.strength])).toEqual([
       ['ramls/loan-type.raml', 3, 'circulation_transactions', 'strong'],
-      ['src/main/resources/application.yml', 1, 'address', 'context']
+      ['src/main/resources/application.yml', 1, 'address', 'context'],
+      ['src/main/resources/application.yml', 2, 'address', 'context']
     ]);
     fs.rmSync(repoPath, { recursive: true, force: true });
   });
 
   it('scans long lines of JDWP options and loan types in linear time', async () => {
     const repos: string[] = [];
-    await expectLinearTime(1_200, size => {
+    await expectLinearTime(900, size => {
       const repoPath = createTempRepo();
       repos.push(repoPath);
-      writeRepoFile(repoPath, 'src/main/resources/application.yml', `java-options: ${'jdwp=loan-types,'.repeat(size)}\n`);
+      writeRepoFile(repoPath, 'src/main/resources/application.yml', `java-options: ${'jdwp:address=loan-types,'.repeat(size)}\n`);
       return repoPath;
     }, async repoPath => gatherS005PersonalDataEvidence(repoPath));
     for (const repo of repos) fs.rmSync(repo, { recursive: true, force: true });

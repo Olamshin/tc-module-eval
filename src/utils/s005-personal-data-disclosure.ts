@@ -1138,7 +1138,7 @@ function isContextOnlyS005Match(category: S005PersonalDataCategory, line: string
       !hasPersonContext) {
     return true;
   }
-  if (category === 'address' && /\bjdwp=/i.test(line) && /\baddress=/i.test(line)) {
+  if (category === 'address' && /jdwp[=:]/i.test(line) && /\baddress=/i.test(line)) {
     return true;
   }
   if (category === 'transmission' && /\bpublisher\b/i.test(line) && !hasPersonContext) {
