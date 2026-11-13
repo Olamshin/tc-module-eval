@@ -245,7 +245,7 @@ const JAVASCRIPT_TEST_TECHNOLOGIES: Array<[RegExp, TestTechnology[]]> = [
   [/^@testing-library\/react$/, [RTL]],
   [/^karma$/, [technology('karma', 'Karma', 'runner')]],
   [/^mocha$/, [technology('mocha', 'Mocha', 'runner')]],
-  [/^@bigtest\/cli$/, [technology('bigtest', 'BigTest', 'runner')]],
+  [/^@bigtest\/(?:cli|mocha)$/, [technology('bigtest', 'BigTest', 'runner')]],
   [/^@bigtest\//, [technology('bigtest-library', 'BigTest', 'helper')]],
   [/^(?:jasmine|jasmine-core)$/, [technology('jasmine', 'Jasmine', 'runner')]],
   [/^vitest$/, [technology('vitest', 'Vitest', 'runner')]],
