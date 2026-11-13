@@ -123,6 +123,9 @@ describe('module-descriptor-artifact', () => {
     expect(result.status).toBe('command-failed');
     expect(result.strategy).toBe('maven-generation');
     expect(result.descriptorPath).toBeUndefined();
+    expect(runner.calls).toEqual([expect.objectContaining({
+      command: 'mvn', args: ['-B', '-ntp', 'process-resources', '-DskipTests'], cwd: repo, maxOutputBytes: 64 * 1024, keepStdoutTail: true
+    })]);
   });
 
   it('should select a generated Maven descriptor and record command evidence', async () => {
