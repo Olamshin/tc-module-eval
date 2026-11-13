@@ -507,6 +507,19 @@ describe('backend runtime harness isolation rules', () => {
     expect(evidence.problem).toBe('the module container stopped running (exit code 137, out of memory)');
     expect(evidence.health).toEqual({ method: 'GET', path: '/admin/health', status: 200, body: '{"status":"UP"}', attempts: 1, waitedMs: 0 });
   });
+
+  it('records no health check when the evaluation is stopped while the module is still starting', async () => {
+    const signals = new FakeSignals();
+    const docker = new FakeDocker();
+    docker.health = () => ({ method: 'GET', path: '/admin/health', status: 503, body: '{"status":"DOWN"}', attempts: 10 });
+    const answers = docker.probe;
+    docker.probe = input => {
+      if (input.phase === 'health') signals.emit('SIGINT', 'SIGINT');
+      return answers(input);
+    };
+    const { evidence } = await collect(docker, signals);
+    expect([evidence.outcome, evidence.problem, 'health' in evidence]).toEqual(['not-run', 'the evaluation was stopped by SIGINT', false]);
+  });
 });
 
 describe('backend runtime evidence in the evaluation', () => {
