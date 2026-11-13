@@ -412,6 +412,20 @@ describe('S007 static technology evidence', () => {
     ]));
   });
 
+  it('reads a Gradle dependency after a string that ends in a configuration name', async () => {
+    await write('build.gradle', `
+      java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+      dependencies {
+        implementation project(":rest-api")
+        implementation "org.springframework.boot:spring-boot-starter-web:3.5.1"
+      }
+    `);
+
+    const result = await collectS007TechnologyEvidence(repoPath, 'java');
+
+    expect(find(result, 'spring-boot')).toMatchObject({ declaredVersion: '3.5.1', sourcePath: 'build.gradle' });
+  });
+
   it('resolves local Gradle properties interpolated in dependency coordinates', async () => {
     await write('build.gradle', `
       def folioGroup = "org.folio"
