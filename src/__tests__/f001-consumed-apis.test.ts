@@ -66,6 +66,29 @@ describe('F001 consumed interfaces', () => {
     expect(analysis.checklist.items.map(item => [item.id, item.reviewerOnly, item.obligations])).toEqual([['F001-C1', true, []]]);
   });
 
+  it('reads the path a stripes-connect mutator passes to GET, and no request from a GET without one', async () => {
+    writePackage({ okapiInterfaces: { circulation: '14.0' } });
+    write('src/Session.js', [
+      'export default class Session {',
+      "  static manifest = Object.freeze({ loans: { type: 'okapi', path: 'circulation/loans', accumulate: true } });",
+      "  end = () => this.props.mutator.loans.GET({ path: 'circulation/end-patron-action-session' });",
+      '  more = () => this.props.mutator.loans.GET({ params: { limit: 10 } });',
+      '}'
+    ].join('\n'));
+    commit();
+
+    const { result, analysis } = await evaluate();
+
+    expect(result.status).toBe(EvaluationStatus.FAIL);
+    expect(analysis.undeclared.map(use => [use.id, use.sites.map(site => `${site.path}:${site.line} ${site.method} ${site.requestPath}`)])).toEqual([
+      ['patron-action-session', ['src/Session.js:3 GET circulation/end-patron-action-session']]
+    ]);
+    expect(analysis.declaredAndUsed.map(use => [use.id, use.sites.map(site => `${site.path}:${site.line} ${site.requestPath}`)])).toEqual([
+      ['circulation', ['src/Session.js:2 circulation/loans']]
+    ]);
+    expect(analysis.siteCount).toBe(2);
+  });
+
   it('stays manual, and names the candidates, when a request cannot be read or could reach several interfaces', async () => {
     writePackage({ okapiInterfaces: { users: '16.5', configuration: '2.0' } });
     // A path constant in a test fixture is not production code, so the tool does not read it.
