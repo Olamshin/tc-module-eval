@@ -11,6 +11,8 @@ By default, local CLI runs use strict command execution and block build-tool com
 folio-eval evaluate <repo-url> --allow-local-commands
 ```
 
+Dependency installs (S003, and S002 before a Stripes descriptor script) pass `--ignore-scripts`, so dependencies' install scripts never run; the repository's own descriptor script still does.
+
 When this flag is used, reports record where commands ran: `github-actions` in GitHub Actions and `local` elsewhere.
 
 Source-inspection review is read-only: it does not mutate evaluated repositories and does not execute repository code, tests, builds, services, databases, or Okapi calls.
