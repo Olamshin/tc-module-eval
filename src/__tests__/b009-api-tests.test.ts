@@ -171,6 +171,24 @@ describe('B009 API tests in a supported technology', () => {
     expect(ambiguous.requested).toEqual([]);
   });
 
+  it('recognises a Postman collection by its schema, whatever the file is called', async () => {
+    const collection = (schema: string) => JSON.stringify({ info: { _postman_id: 'id', name: 'MARC Migrations API', schema }, item: [] });
+    const root = backendModule('mod-users', {
+      'postman/collections/api.json': collection('https://schema.getpostman.com/json/collection/v2.1.0/collection.json'),
+      'postman/environments/local.json': JSON.stringify({ name: 'local', values: [] }),
+      'collections/broken.json': '{',
+      'src/main/resources/collections/other.json': collection('https://json-schema.org/draft-07/schema')
+    });
+    const { result, analysis } = await b009(root, { responses: INTEGRATION_TESTS });
+
+    expect(result.status).toBe(EvaluationStatus.FAIL);
+    expect(result.evidence).toBe('B009 fail: The repository has API tests in Postman, which is not on the officially supported technologies page (it lists Karate for backend API tests).');
+    expect(analysis.suites.filter(suite => suite.source === 'repository').map(suite => [suite.framework, suite.files])).toEqual([
+      ['postman', ['postman/collections/api.json']]
+    ]);
+    expect(analysis.unread).toEqual([]);
+  });
+
   it('fails on API tests in an unlisted framework, even next to Karate tests and a Karate folder in folio-integration-tests', async () => {
     const root = backendModule('mod-users', {
       'src/test/resources/karate/users.feature': KARATE_FEATURE,
