@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { FRAMEWORK_LABELS } from './b001-descriptor-template';
 import { descriptorEndpoints, EndpointMatcher, endpointLibraries, endpointMatcher, gapCovers, lookup, pathIndex, uniqueEndpoints } from './backend-endpoints';
+import { endpointFramework } from './backend-evidence';
 import { HEALTH_ROUTE, routerRoutes, sourceRoutes } from './backend-routes';
 import { frontendChecklist, renderFrontendChecklistLines } from './frontend-checklist';
 import { count, listText, overflowLine, reportPath, reportText, unique } from './report-text';
@@ -49,7 +50,7 @@ export function evaluateB006(evidence: BackendEvidence, apiSpecs: BackendApiSpec
   let unreadRouteCount = 0;
   let endpointSource: string;
   if (kind === 'edge-module') {
-    const spring = framework.name === 'spring';
+    const spring = endpointFramework(evidence) === 'spring';
     const scan = (spring ? sourceRoutes : routerRoutes)(evidence.snapshot.files);
     ({ unreadRoutes, unreadRouteCount } = scan);
     matchers = uniqueEndpoints(scan.routes.filter(route => route.path !== HEALTH_ROUTE)).map(endpointMatcher);

@@ -380,7 +380,7 @@ describe('B006 API documentation', () => {
     expect(documentation(analysis)).toEqual({ 'GET /example/accounts/{accountId}': 'openapi', 'POST /example/accounts': 'undocumented' });
     expect(result.status).toBe(EvaluationStatus.FAIL);
     expect(result.details?.split('\n').slice(1, 3)).toEqual([
-      'Framework: Spring Boot; RAML does not count as documentation',
+      'Framework: edge module; RAML does not count as documentation',
       'Endpoints: 2 methods and paths from router routes and Spring mapping annotations in src/main'
     ]);
   });
