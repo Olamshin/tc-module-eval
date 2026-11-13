@@ -137,6 +137,8 @@ const REVIEWABLE_DISCLOSURE_CATEGORIES = new Set<S005PersonalDataCategory>([
   'cache',
   'logging'
 ]);
+// A Java debugger option (-agentlib:jdwp=..., -Xrunjdwp:...) names a socket address, not a person's.
+const JDWP_OPTION = /jdwp[=:]\S*/gi;
 const CATEGORIES_WITHOUT_DETERMINISTIC_OVER_DISCLOSURE = new Set<S005PersonalDataCategory>([
   'processing'
 ]);
@@ -1102,14 +1104,15 @@ function extractS005EvidenceSignals(
       continue;
     }
 
+    const scanned = line.replace(JDWP_OPTION, ' ');
     const categoriesSeenOnLine = new Set<S005PersonalDataCategory>();
     for (const categoryPattern of S005_EVIDENCE_CATEGORY_PATTERNS) {
-      if (!categoryPattern.pattern.test(line) || categoriesSeenOnLine.has(categoryPattern.category)) {
+      if (!categoryPattern.pattern.test(scanned) || categoriesSeenOnLine.has(categoryPattern.category)) {
         continue;
       }
 
       categoriesSeenOnLine.add(categoryPattern.category);
-      const strength = isContextOnlyS005Match(categoryPattern.category, line)
+      const strength = isContextOnlyS005Match(categoryPattern.category, scanned)
         ? 'context'
         : sourceStrength;
       signals.push({
@@ -1136,9 +1139,6 @@ function isContextOnlyS005Match(category: S005PersonalDataCategory, line: string
   if (category === 'address' &&
       (/\blocation\b/i.test(line) || /\b(?:electronic resource|resource|url|uri|href|endpoint)\s+address\b/i.test(line)) &&
       !hasPersonContext) {
-    return true;
-  }
-  if (category === 'address' && /jdwp[=:]/i.test(line) && /\baddress=/i.test(line)) {
     return true;
   }
   if (category === 'transmission' && /\bpublisher\b/i.test(line) && !hasPersonContext) {
