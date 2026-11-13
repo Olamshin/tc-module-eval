@@ -149,7 +149,11 @@ async function runFrontendDescriptorStrategy(
     requiresIsolation: true,
     networkPolicy: NPM_NETWORK_POLICY
   };
-  const before = snapshotRootDescriptors(repoPath);
+  const before = backUpRootDescriptors(repoPath, scriptName);
+  if (typeof before === 'string') {
+    return artifact('unsafe-to-run', { strategy: 'frontend-script', descriptorScript: scriptName, errors: [before] });
+  }
+
   const hadNodeModules = pathExists(path.join(repoPath, 'node_modules'));
   let wroteNpmrc = false;
   let result: ModuleDescriptorArtifact | undefined;
@@ -174,7 +178,8 @@ async function runFrontendDescriptorStrategy(
       ...(wroteNpmrc ? ['.npmrc'] : []),
       ...FRONTEND_DESCRIPTOR_NAMES.filter(name => !before.has(name))
     ];
-    result?.warnings.push(...restoreRootDescriptors(repoPath, before), ...removeCreatedPaths(repoPath, created));
+    const problems = [...restoreRootDescriptors(repoPath, before), ...removeCreatedPaths(repoPath, created)];
+    result?.warnings.push(...problems);
   }
 }
 
@@ -182,7 +187,7 @@ async function generateFrontendDescriptor(
   repoPath: string,
   scriptName: string,
   installRequest: CommandExecutionRequest,
-  before: Map<string, RootDescriptorSnapshot>,
+  before: Map<string, RootDescriptorBackup>,
   evaluationRun: EvaluationRun | undefined,
   commandRunner: CommandRunner
 ): Promise<ModuleDescriptorArtifact> {
@@ -244,6 +249,10 @@ async function generateFrontendDescriptor(
 }
 
 function readDescriptorText(descriptorPath: string): string {
+  return readDescriptorBytes(descriptorPath).toString('utf-8');
+}
+
+function readDescriptorBytes(descriptorPath: string): Buffer {
   if (!fs.statSync(descriptorPath).isFile()) {
     throw new Error('it is not a regular file');
   }
@@ -251,7 +260,7 @@ function readDescriptorText(descriptorPath: string): string {
   if (bytes.length > MAX_GENERATED_DESCRIPTOR_BYTES) {
     throw new Error(`it is larger than ${MAX_GENERATED_DESCRIPTOR_BYTES / (1024 * 1024)} MiB`);
   }
-  return bytes.toString('utf-8');
+  return bytes;
 }
 
 function removeCreatedPaths(repoPath: string, names: string[]): string[] {
@@ -422,58 +431,46 @@ function isDescriptorTemplateName(fileName: string): boolean {
   return /moduledescriptor.*\.json$/i.test(fileName);
 }
 
-interface RootDescriptorSnapshot {
+interface RootDescriptorBackup {
   signature: string;
-  link?: string;
-  /** The in-repository regular file the name resolves to, and its bytes. */
-  target?: { path: string; bytes: Buffer };
+  bytes: Buffer;
 }
 
-function snapshotRootDescriptors(repoPath: string): Map<string, RootDescriptorSnapshot> {
-  const snapshot = new Map<string, RootDescriptorSnapshot>();
+/** Backs up the root descriptors the script may overwrite, or explains why the script cannot run safely. */
+function backUpRootDescriptors(repoPath: string, scriptName: string): Map<string, RootDescriptorBackup> | string {
+  const backups = new Map<string, RootDescriptorBackup>();
   for (const name of FRONTEND_DESCRIPTOR_NAMES) {
     const candidate = path.join(repoPath, name);
-    const signature = pathSignature(candidate);
-    if (!signature) {
+    const stats = fs.lstatSync(candidate, { throwIfNoEntry: false });
+    if (!stats) {
       continue;
     }
-    const entry: RootDescriptorSnapshot = { signature };
-    try {
-      if (fs.lstatSync(candidate).isSymbolicLink()) {
-        entry.link = fs.readlinkSync(candidate);
-      }
-      if (isSafeFinalDescriptor(repoPath, candidate) && fs.statSync(candidate).isFile()) {
-        const bytes = readBoundedFileBytes(candidate, MAX_GENERATED_DESCRIPTOR_BYTES + 1);
-        if (bytes.length <= MAX_GENERATED_DESCRIPTOR_BYTES) {
-          entry.target = { path: fs.realpathSync(candidate), bytes };
-        }
-      }
-    } catch {
-      entry.target = undefined;
+    if (stats.isSymbolicLink()) {
+      return `${name} at the repository root is a symbolic link, and a committed descriptor symlink cannot be safely regenerated, so the ${scriptName} script was not run.`;
     }
-    snapshot.set(name, entry);
+    try {
+      backups.set(name, { signature: pathSignature(candidate) ?? '', bytes: readDescriptorBytes(candidate) });
+    } catch (error) {
+      return `${name} at the repository root could not be backed up (${errorMessage(error)}), so the ${scriptName} script was not run.`;
+    }
   }
-  return snapshot;
+  return backups;
 }
 
-function restoreRootDescriptors(repoPath: string, before: Map<string, RootDescriptorSnapshot>): string[] {
+function restoreRootDescriptors(repoPath: string, before: Map<string, RootDescriptorBackup>): string[] {
   const problems: string[] = [];
-  for (const [name, entry] of before) {
+  for (const [name, backup] of before) {
     const candidate = path.join(repoPath, name);
-    if (pathSignature(candidate) === entry.signature) {
-      continue;
-    }
     try {
-      if (entry.link !== undefined && !(fs.lstatSync(candidate, { throwIfNoEntry: false })?.isSymbolicLink() && fs.readlinkSync(candidate) === entry.link)) {
-        fs.rmSync(candidate, { recursive: true, force: true, maxRetries: 3 });
-        fs.symlinkSync(entry.link, candidate);
+      if (pathSignature(candidate) === backup.signature) {
+        continue;
       }
-      const target = entry.target;
-      const writePath = target && (entry.link !== undefined ? target.path : candidate);
-      if (target && writePath && !hasBytes(writePath, target.bytes)) {
-        fs.rmSync(writePath, { recursive: true, force: true, maxRetries: 3 });
-        fs.writeFileSync(writePath, target.bytes, { flag: 'wx' });
+      const current = fs.lstatSync(candidate, { throwIfNoEntry: false });
+      if (current?.isFile() && readBoundedFileBytes(candidate, backup.bytes.length + 1).equals(backup.bytes)) {
+        continue;
       }
+      fs.rmSync(candidate, { recursive: true, force: true, maxRetries: 3 });
+      fs.writeFileSync(candidate, backup.bytes, { flag: 'wx' });
     } catch (error) {
       problems.push(`The evaluator could not restore ${name}, which the descriptor script changed: ${errorMessage(error)}`);
     }
@@ -481,28 +478,9 @@ function restoreRootDescriptors(repoPath: string, before: Map<string, RootDescri
   return problems;
 }
 
-function hasBytes(filePath: string, bytes: Buffer): boolean {
-  try {
-    return fs.lstatSync(filePath).isFile() && readBoundedFileBytes(filePath, bytes.length + 1).equals(bytes);
-  } catch {
-    return false;
-  }
-}
-
-// Covers the name itself and, through a symlink, the file it points to.
 function pathSignature(candidatePath: string): string | undefined {
-  const signature = (stats: fs.Stats | undefined) => stats ? `${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}` : '';
-  const link = fs.lstatSync(candidatePath, { throwIfNoEntry: false });
-  if (!link) {
-    return undefined;
-  }
-  let target: fs.Stats | undefined;
-  try {
-    target = fs.statSync(candidatePath);
-  } catch {
-    target = undefined;
-  }
-  return `${signature(link)}|${signature(target)}`;
+  const stats = fs.lstatSync(candidatePath, { throwIfNoEntry: false });
+  return stats && `${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
 }
 
 function pathExists(candidatePath: string): boolean {
