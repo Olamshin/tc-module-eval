@@ -38,10 +38,11 @@ export async function produceModuleDescriptorArtifact(
       findCandidates: () => findGeneratedDescriptorCandidates(validatedPath),
       request: {
         command: 'mvn',
-        args: ['process-resources', '-DskipTests'],
+        args: ['-B', '-ntp', 'process-resources', '-DskipTests'],
         cwd: validatedPath,
         timeoutMs: 300000,
         maxOutputBytes: 64 * 1024,
+        keepStdoutTail: true,
         requiresIsolation: true,
         networkPolicy: MAVEN_NETWORK_POLICY
       }

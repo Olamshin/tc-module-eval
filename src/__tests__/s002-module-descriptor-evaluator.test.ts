@@ -269,15 +269,34 @@ describe('S002 module descriptor evaluator', () => {
 
     const truncatedRun = createEvaluationRun({ repositoryPath: repo, language: 'java', criteriaFilter: ['S002'] });
     truncatedRun.artifacts.moduleDescriptor = {
-      status: 'command-failed', strategy: 'maven-generation',
-      command: { ...command, exitCode: 1, stdout: '[ERROR] early failure\n[output truncated to 65536 bytes]', stdoutTruncated: true },
+      status: 'command-failed', strategy: 'gradle-generation',
+      command: { ...command, exitCode: 1, stderr: 'error: early failure\n[output truncated to 65536 bytes]', stderrTruncated: true },
       warnings: [], errors: ['Command exited with code 1']
     };
     const truncated = await evaluator.evaluateCriterion('S002', repo, truncatedRun);
 
     expect(truncated.details).toContain(
-      'Build error (error lines from the build output; the build printed more than the evaluator keeps, so the final lines are missing):\n  - [ERROR] early failure'
+      'Build error (error lines from the build output; the build printed more than the evaluator keeps, so the final lines are missing):\n  - error: early failure'
     );
+  });
+
+  it('should list the end of Maven output that the runner cut at its start, without a cut-off note', async () => {
+    const repo = tempRepo();
+    const run = createEvaluationRun({ repositoryPath: repo, language: 'java', criteriaFilter: ['S002'] });
+    run.artifacts.moduleDescriptor = {
+      status: 'command-failed', strategy: 'maven-generation',
+      command: {
+        identity: 'mvn', command: 'mvn', args: ['-B', '-ntp', 'process-resources', '-DskipTests'], cwd: repo,
+        commandExecutionEnvironment: 'local', localCommandsAllowed: true, status: 'failed', exitCode: 1, durationMs: 0,
+        stdout: '[output truncated: kept the last 60 of 900000 bytes]\n[INFO] BUILD FAILURE\n[ERROR] Failed to execute goal\n',
+        stdoutTruncated: true, stderr: '', sanitized: true
+      },
+      warnings: [], errors: ['Command exited with code 1']
+    };
+
+    const result = await new JavaSharedEvaluator().evaluateCriterion('S002', repo, run);
+
+    expect(result.details!.split('\n').slice(-2)).toEqual(['Build error (error lines from the end of the build output):', '  - [ERROR] Failed to execute goal']);
   });
 
   it('should keep repository text from adding report rows or report syntax', async () => {
