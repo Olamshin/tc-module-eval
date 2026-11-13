@@ -182,6 +182,7 @@ describe('EvaluationReportRenderer', () => {
     expect(html).toContain('Collapse criteria');
     expect(html).toContain('Download JSON');
     expect(html).toContain('No automated check');
+    expect(html).toContain("{key:'not-applicable',title:'Not applicable',note:'These criteria do not apply to this repository.'}");
     expect(html).toContain('window.addEventListener(\'keydown\'');
     expect(html).not.toContain('fetch(');
     expect(html).not.toMatch(/<(?:script|link)[^>]+(?:src|href)=/);
