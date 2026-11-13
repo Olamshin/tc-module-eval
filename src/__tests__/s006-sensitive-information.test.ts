@@ -71,6 +71,20 @@ describe('S006 email and URL domain review', () => {
   beforeEach(() => { repoPath = createTempRepo(); });
   afterEach(() => { fs.rmSync(repoPath, { recursive: true, force: true }); });
 
+  it('reads an email address inside single quotes or backticks', async () => {
+    writeRepoFile(repoPath, 'src/main/resources/application.properties', "mail.from='noreply@quoted.example.invalid'\n");
+    writeRepoFile(repoPath, 'src/main/js/notify.js', "const to = `ops@quoted.example.invalid`;\nconst cc = ''''x@quoted.example.invalid'''';\n");
+    const result = await analyzeRepo(repoPath);
+    expect(result.domainReview).toEqual({
+      emailCount: 3, urlCount: 0, omittedOccurrences: 0,
+      domains: [{ domain: 'quoted.example.invalid', emailCount: 3, urlCount: 0, fileCount: 2, files: [
+        { path: 'src/main/resources/application.properties', emailCount: 1, urlCount: 0 },
+        { path: 'src/main/js/notify.js', emailCount: 2, urlCount: 0 }
+      ] }]
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
   it('groups occurrences and source files exactly without retaining mailbox names or URL payloads', async () => {
     writeRepoFile(repoPath, 'src/main/resources/sample-data/users-15.4.0/a.json', JSON.stringify({
       email: 'alpha+review@SHARED.example.invalid',
