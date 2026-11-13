@@ -450,7 +450,7 @@ describe('B003 endpoint implementations', () => {
 
     const { result, analysis } = await b003(root);
 
-    expect([analysis.kind, analysis.framework.name]).toEqual(['edge-module', 'spring']);
+    expect([analysis.kind, analysis.framework.name]).toEqual(['edge-module', 'edge']);
     expect(implementations(analysis)).toEqual({ 'GET /inventory/instances': 'interface' });
     expect(result.status).toBe(EvaluationStatus.PASS);
   });
