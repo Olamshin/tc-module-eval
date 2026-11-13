@@ -141,7 +141,7 @@ describe('npm-dependency-parser', () => {
 
       expect(runner.calls[0]).toMatchObject({
         command: 'yarn',
-        args: ['install', '--production', '--ignore-scripts', '--ignore-engines'],
+        args: ['install', '--production', '--ignore-scripts', '--ignore-engines', '--pure-lockfile'],
         cwd: '/test/repo',
         requiresIsolation: true,
         networkPolicy: expect.objectContaining({ default: 'deny' })
