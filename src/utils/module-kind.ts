@@ -94,7 +94,7 @@ function hasUiModuleMarker(
 }
 
 // A Stripes package without an actsAs role is a library whatever its name, e.g. stripes-acq-components' `"actsAs": [""]`.
-function hasStripesLibraryMarker(packageJson: Record<string, unknown> | undefined, evidence: string[]): boolean {
+export function hasStripesLibraryMarker(packageJson: Record<string, unknown> | undefined, evidence: string[]): boolean {
   const stripes = packageJson?.stripes;
   if (!stripes || typeof stripes !== 'object') {
     return false;
@@ -108,7 +108,7 @@ function hasStripesLibraryMarker(packageJson: Record<string, unknown> | undefine
 }
 
 // Matches package names only: real runs clone into `<repo>/<timestamp>`, so the directory name says nothing.
-function hasExplicitLibraryMarker(
+export function hasExplicitLibraryMarker(
   packageJson: Record<string, unknown> | undefined,
   pomArtifactId: string | undefined,
   evidence: string[]

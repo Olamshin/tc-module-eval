@@ -44,8 +44,9 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { CommandRunner, Dependency, DependencyExtractionResult, DependencyExtractionError, EvaluationRun } from '../../types';
+import { CommandExecutionResult, CommandRunner, Dependency, DependencyExtractionResult, DependencyExtractionError, EvaluationRun } from '../../types';
 import { normalizeLicenseName } from '../license-policy';
 import { errorMessage, isNonEmptyString, isRecord, isValidDependency } from '../type-guards';
 import { commandError, validateRepoPath } from './common';
@@ -60,8 +61,26 @@ const NPM_BUILD_FILES = ['package.json'];
 const FOLIO_NPM_REGISTRY_URL = 'https://repository.folio.org/repository/npm-folio';
 const MAX_SPDX_ALTERNATIVES = 64;
 
-function createNpmToolEnv(repoPath: string): NodeJS.ProcessEnv {
-  const npmToolDir = path.join(repoPath, '.folio-eval-npm');
+/** Points the @folio scope at the FOLIO registry unless the repository has its own .npmrc; returns whether it wrote one. */
+export function writeFolioNpmrcIfMissing(repoPath: string): boolean {
+  const npmrcPath = path.join(repoPath, '.npmrc');
+  if (fs.existsSync(npmrcPath)) {
+    return false;
+  }
+
+  getLogger().info('Creating .npmrc with FOLIO registry configuration...');
+  try {
+    // 'wx' never follows an existing path, so a dangling symlink cannot redirect this write outside the repository.
+    fs.writeFileSync(npmrcPath, `@folio:registry=${FOLIO_NPM_REGISTRY_URL}\n`, { encoding: 'utf-8', flag: 'wx' });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    getLogger().warn('.npmrc is a symlink to a missing file; leaving it unchanged');
+    return false;
+  }
+}
+
+function createNpmToolEnv(npmToolDir: string): NodeJS.ProcessEnv {
   const npmPrefix = path.join(npmToolDir, 'prefix');
   const npmCache = path.join(npmToolDir, 'cache');
 
@@ -239,26 +258,17 @@ export async function getNpmDependencies(
   }
 
   try {
-    const npmrcPath = path.join(validatedPath, '.npmrc');
-    if (!fs.existsSync(npmrcPath)) {
-      getLogger().info('Creating .npmrc with FOLIO registry configuration...');
-      try {
-        // 'wx' never follows an existing path, so a dangling symlink cannot redirect this write outside the repository.
-        fs.writeFileSync(npmrcPath, `@folio:registry=${FOLIO_NPM_REGISTRY_URL}\n`, { encoding: 'utf-8', flag: 'wx' });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        getLogger().warn('.npmrc is a symlink to a missing file; leaving it unchanged');
-      }
-    }
+    writeFolioNpmrcIfMissing(validatedPath);
 
     // SECURITY: --ignore-scripts prevents execution of preinstall/postinstall/etc scripts
     // --ignore-engines bypasses Node.js engine compatibility checks that can cause
     // failures when transitive dependencies require newer Node versions (e.g., @formatjs/cli
     // requiring Node >= 20). Engine compat is irrelevant for license extraction.
+    // --pure-lockfile keeps yarn from writing a yarn.lock that other criteria would read as committed.
     getLogger().info('Running yarn install...');
     const installResult = await commandRunner.run({
       command: 'yarn',
-      args: ['install', '--production', '--ignore-scripts', '--ignore-engines'],
+      args: ['install', '--production', '--ignore-scripts', '--ignore-engines', '--pure-lockfile'],
       cwd: validatedPath,
       timeoutMs: INSTALL_TIMEOUT,
       requiresIsolation: true,
@@ -271,16 +281,22 @@ export async function getNpmDependencies(
 
     // Use npx with pinned version to ensure consistency across environments
     getLogger().info('Running license-checker-rseidelsohn...');
-    const checkerResult = await commandRunner.run({
-      command: 'npx',
-      args: ['--yes', 'license-checker-rseidelsohn@4.4.2', '--json', '--production'],
-      cwd: validatedPath,
-      env: createNpmToolEnv(validatedPath) as Record<string, string | undefined>,
-      timeoutMs: LICENSE_CHECK_TIMEOUT,
-      maxOutputBytes: LICENSE_CHECK_MAX_OUTPUT,
-      requiresIsolation: true,
-      networkPolicy: NPM_NETWORK_POLICY
-    }, evaluationRun);
+    const npmToolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'folio-eval-npm-'));
+    let checkerResult: CommandExecutionResult;
+    try {
+      checkerResult = await commandRunner.run({
+        command: 'npx',
+        args: ['--yes', 'license-checker-rseidelsohn@4.4.2', '--json', '--production'],
+        cwd: validatedPath,
+        env: createNpmToolEnv(npmToolDir) as Record<string, string | undefined>,
+        timeoutMs: LICENSE_CHECK_TIMEOUT,
+        maxOutputBytes: LICENSE_CHECK_MAX_OUTPUT,
+        requiresIsolation: true,
+        networkPolicy: NPM_NETWORK_POLICY
+      }, evaluationRun);
+    } finally {
+      fs.rmSync(npmToolDir, { recursive: true, force: true });
+    }
 
     if (checkerResult.status !== 'success') {
       return { dependencies: [], errors: [commandError('npm-parser', 'npm', checkerResult)], warnings };
