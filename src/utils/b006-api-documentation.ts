@@ -11,15 +11,20 @@ import {
 } from '../types';
 import { FRAMEWORK_LABELS } from './b001-descriptor-template';
 import { descriptorEndpoints, EndpointMatcher, endpointLibraries, endpointMatcher, gapCovers, lookup, pathIndex, uniqueEndpoints } from './backend-endpoints';
-import { HEALTH_ROUTE, routerRoutes } from './backend-routes';
+import { endpointFramework } from './backend-evidence';
+import { HEALTH_ROUTE, routerRoutes, sourceRoutes, withoutComments } from './backend-routes';
 import { frontendChecklist, renderFrontendChecklistLines } from './frontend-checklist';
 import { count, listText, overflowLine, reportPath, reportText, unique } from './report-text';
 
 const MAX_ROWS = 20;
+// Like the health check, the path Spring forwards failed requests to is not part of the module's API.
+const ERROR_ROUTE = '/error';
+const ERROR_CONTROLLER = /\bimplements\s[\w.\s,<>]{0,500}?\bErrorController\b/;
 
 /**
  * B006 (all API endpoints documented in OpenAPI) looks up every endpoint the module serves in the repository's API
- * specs: the descriptor template's handlers, without system interfaces, or for an edge module its router routes.
+ * specs: the descriptor template's handlers, without system interfaces, or for an edge module its router routes, and
+ * its Spring mapping annotations when it is a Spring Boot application.
  * RAML counts only for an RMB module in an existing-module evaluation.
  */
 export function evaluateB006(evidence: BackendEvidence, apiSpecs: BackendApiSpecs, existingModule: boolean): B006Analysis {
@@ -48,13 +53,17 @@ export function evaluateB006(evidence: BackendEvidence, apiSpecs: BackendApiSpec
   let unreadRouteCount = 0;
   let endpointSource: string;
   if (kind === 'edge-module') {
-    const scan = routerRoutes(evidence.snapshot.files);
+    const spring = endpointFramework(evidence) === 'spring';
+    const scan = (spring ? sourceRoutes : routerRoutes)(evidence.snapshot.files);
     ({ unreadRoutes, unreadRouteCount } = scan);
-    matchers = uniqueEndpoints(scan.routes.filter(route => route.path !== HEALTH_ROUTE)).map(endpointMatcher);
-    endpointSource = 'router routes in src/main';
+    const errorControllers = new Set(evidence.snapshot.files
+      .filter(file => file.content.includes('ErrorController') && ERROR_CONTROLLER.test(withoutComments(file.content)))
+      .map(file => file.path));
+    matchers = uniqueEndpoints(scan.routes.filter(route => route.path !== HEALTH_ROUTE && !(route.path === ERROR_ROUTE && errorControllers.has(route.file)))).map(endpointMatcher);
+    endpointSource = spring ? 'router routes and Spring mapping annotations in src/main' : 'router routes in src/main';
     if (!matchers.length) {
       return result(EvaluationStatus.MANUAL, 'no-routes',
-        'The repository is an edge module, but no router route with a readable path was found, so its endpoints are not known.',
+        `The repository is an edge module, but no router route${spring ? ' or Spring mapping' : ''} with a readable path was found, so its endpoints are not known.`,
         [unchecked(unreadRoutes.map(route => ({ path: route.file, line: route.line, note: 'router route whose path the tool could not read' })))],
         { unreadRoutes, unreadRouteCount, endpointSource });
     }
