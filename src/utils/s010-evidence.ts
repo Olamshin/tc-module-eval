@@ -8,17 +8,7 @@ import {
   S010ScenarioEvidence
 } from '../types';
 import { CommittedSourceFile, readCommittedSource } from './committed-source';
-
-const LIBRARY_NAMES = new Set([
-  'folio-spring-base',
-  'folio-spring-support',
-  'folio-kafka-wrapper',
-  'stripes-components',
-  'stripes-core',
-  'stripes-connect',
-  'stripes-smart-components',
-  'stripes-testing'
-]);
+import { hasExplicitLibraryMarker, hasStripesLibraryMarker, pomArtifactId } from './module-kind';
 
 export const S010_SOURCE_LIMITS = {
   maxFiles: 1_500,
@@ -109,9 +99,8 @@ export async function collectS010Evidence(
   const diagnostics: S010Diagnostic[] = snapshot.diagnostics.map(item => ({ ...item }));
   const files = new Map(snapshot.files.map(file => [file.path, file]));
   const packageJson = parsePackageJson(files.get('package.json'), diagnostics);
-  const pom = files.get('pom.xml')?.content;
   const runtimeKind = determineRuntimeKind(snapshot.files, packageJson, language);
-  const moduleKind = determineModuleKind(snapshot.files, packageJson, pom, runtimeKind);
+  const moduleKind = determineModuleKind(snapshot.files, packageJson, files.get('pom.xml')?.content, runtimeKind);
   const scenarios: S010ScenarioEvidence[] = [];
   let semanticIncomplete = runtimeKind === 'node' || runtimeKind === 'mixed' || runtimeKind === 'unknown';
 
@@ -460,22 +449,29 @@ function determineRuntimeKind(
   return 'unknown';
 }
 
+/**
+ * Classifies from the committed files only, with the library rules of the shared module kind. A `ui-` package name
+ * or a legacy `stripes.type` keeps a Stripes package without an `actsAs` role a UI module.
+ */
 function determineModuleKind(
   files: CommittedSourceFile[],
   packageJson: PackageJson | undefined,
   pom: string | undefined,
   runtimeKind: S010RuntimeKind
 ): ModuleKindResult {
-  const names = [
-    packageJson?.name?.replace(/^@folio\//, ''),
-    pom?.match(/<artifactId>([^<]+)<\/artifactId>/)?.[1]
-  ].filter((name): name is string => Boolean(name));
-  const library = names.find(name => LIBRARY_NAMES.has(name));
-  if (library) return { kind: 'library', evidence: [`Explicit library marker: ${library}`], warnings: [] };
+  const evidence: string[] = [];
+  const warnings: string[] = [];
   const descriptor = files.find(file => /(?:^|\/)ModuleDescriptor[^/]*\.json$/i.test(file.path));
-  if (descriptor) return { kind: 'backend-module', evidence: [`Committed module descriptor: ${descriptor.path}`], warnings: [] };
-  if (runtimeKind === 'stripes-react') return { kind: 'ui-module', evidence: ['Committed React and Stripes package metadata'], warnings: [] };
-  return { kind: 'ambiguous', evidence: ['No explicit deployable module or library marker found'], warnings: [] };
+  if (descriptor) return { kind: 'backend-module', evidence: [`Committed module descriptor: ${descriptor.path}`], warnings };
+  const uiName = typeof packageJson?.name === 'string' && /^(?:@folio\/)?ui-/.test(packageJson.name);
+  const stripesType = typeof packageJson?.stripes?.type === 'string' && packageJson.stripes.type.trim() !== '';
+  const metadata = packageJson as Record<string, unknown> | undefined;
+  if (hasExplicitLibraryMarker(metadata, pom ? pomArtifactId(pom, warnings) : undefined, evidence)
+    || (!uiName && !stripesType && hasStripesLibraryMarker(metadata, evidence))) {
+    return { kind: 'library', evidence, warnings };
+  }
+  if (runtimeKind === 'stripes-react' || uiName || stripesType) return { kind: 'ui-module', evidence: ['Committed React and Stripes package metadata'], warnings };
+  return { kind: 'ambiguous', evidence: ['No explicit deployable module or library marker found'], warnings };
 }
 
 function parsePackageJson(file: CommittedSourceFile | undefined, diagnostics: S010Diagnostic[]): PackageJson | undefined {

@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import { collectS007TechnologyEvidence } from '../utils/s007-technology-evidence';
+import { expectLinearTime } from './helpers/linear-time';
 
 describe('S007 static technology evidence', () => {
   let repoPath: string;
@@ -410,6 +411,49 @@ describe('S007 static technology evidence', () => {
     expect(result.diagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'version_unresolved', path: 'build.gradle' })
     ]));
+  });
+
+  it.each([
+    ['a project path', 'implementation project(":rest-api")'],
+    ['a project path after a slash', 'implementation project(":mod/api")'],
+    ['a URL', 'maven { url "https://repo.example.org/api" }']
+  ])('reads a Gradle dependency after %s that ends in a configuration name', async (_name, before) => {
+    await write('build.gradle', `
+      java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+      dependencies {
+        ${before}
+        implementation "org.springframework.boot:spring-boot-starter-web:3.5.1"
+      }
+    `);
+
+    const result = await collectS007TechnologyEvidence(repoPath, 'java');
+
+    expect(find(result, 'spring-boot')).toMatchObject({ declaredVersion: '3.5.1', sourcePath: 'build.gradle' });
+  });
+
+  it('skips Gradle declarations written inside a string in linear time', async () => {
+    const prepare = async (size: number) => {
+      const root = await fs.mkdtemp(path.join(repoPath, 'linear-'));
+      await fs.outputFile(path.join(root, 'build.gradle'),
+        `description = '''${'implementation "org.example:inside:1.0" '.repeat(size)}'''\nimplementation "org.springframework.boot:spring-boot-starter-web:3.5.1"\n`);
+      return root;
+    };
+
+    const result = await expectLinearTime(2_000, prepare, root => collectS007TechnologyEvidence(root, 'java'));
+
+    expect(find(result, 'spring-boot')).toMatchObject({ declaredVersion: '3.5.1' });
+    expect(result.observations.some((observation: { identityCandidates: string[] }) => observation.identityCandidates.some(id => id.includes('inside')))).toBe(false);
+  });
+
+  it('reads a qualified Gradle dependency call', async () => {
+    await write('build.gradle', `
+      java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+      dependencies.implementation("org.folio:folio-s3-client:1.0.0")
+    `);
+
+    const result = await collectS007TechnologyEvidence(repoPath, 'java');
+
+    expect(find(result, 'folio-s3-client')).toMatchObject({ declaredVersion: '1.0.0', sourcePath: 'build.gradle' });
   });
 
   it('resolves local Gradle properties interpolated in dependency coordinates', async () => {
