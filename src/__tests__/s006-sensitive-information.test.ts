@@ -71,6 +71,28 @@ describe('S006 email and URL domain review', () => {
   beforeEach(() => { repoPath = createTempRepo(); });
   afterEach(() => { fs.rmSync(repoPath, { recursive: true, force: true }); });
 
+  it('reads an email address inside single quotes or backticks', async () => {
+    writeRepoFile(repoPath, 'src/main/resources/application.properties', "mail.from='noreply@quoted.example.invalid'\n");
+    writeRepoFile(repoPath, 'src/main/js/notify.js', "const to = `ops@quoted.example.invalid`;\nconst cc = ''''x@quoted.example.invalid'''';\n");
+    writeRepoFile(repoPath, 'src/main/js/contact.js', "const to = 'ops@suffix.example.invalid'.trim();\nconst cc = \"o'brien@suffix.example.invalid\";\n");
+    writeRepoFile(repoPath, 'docs/contact.md', "Contact 'help@suffix.example.invalid'.\n");
+    const result = await analyzeRepo(repoPath);
+    expect(result.domainReview).toEqual({
+      emailCount: 6, urlCount: 0, omittedOccurrences: 0,
+      domains: [
+        { domain: 'quoted.example.invalid', emailCount: 3, urlCount: 0, fileCount: 2, files: [
+          { path: 'src/main/resources/application.properties', emailCount: 1, urlCount: 0 },
+          { path: 'src/main/js/notify.js', emailCount: 2, urlCount: 0 }
+        ] },
+        { domain: 'suffix.example.invalid', emailCount: 3, urlCount: 0, fileCount: 2, files: [
+          { path: 'src/main/js/contact.js', emailCount: 2, urlCount: 0 },
+          { path: 'docs/contact.md', emailCount: 1, urlCount: 0 }
+        ] }
+      ]
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
   it('groups occurrences and source files exactly without retaining mailbox names or URL payloads', async () => {
     writeRepoFile(repoPath, 'src/main/resources/sample-data/users-15.4.0/a.json', JSON.stringify({
       email: 'alpha+review@SHARED.example.invalid',
@@ -211,6 +233,15 @@ describe('S006 email and URL domain review', () => {
     expect(result.domainReview).toMatchObject({ emailCount: mode === 'long non-matches' ? 1 : 800,
       urlCount: mode === 'long non-matches' ? 0 : 800, omittedOccurrences: 0,
       domains: [{ domain: 'valid.invalid', fileCount: 1 }] });
+  }, 60_000);
+
+  it('collects quoted runs with and without @ in linear time', async () => {
+    const result = await expectLinearTime(3000, size => `${"a'".repeat(size)} ${"x@y'".repeat(size)}\na@valid.invalid`, async text => {
+      writeRepoFile(repoPath, 'src/linear.txt', text);
+      return analyzeRepo(repoPath);
+    });
+    expect(result.domainReview).toEqual({ emailCount: 1, urlCount: 0, omittedOccurrences: 0,
+      domains: [{ domain: 'valid.invalid', emailCount: 1, urlCount: 0, fileCount: 1, files: [{ path: 'src/linear.txt', emailCount: 1, urlCount: 0 }] }] });
   }, 60_000);
 });
 

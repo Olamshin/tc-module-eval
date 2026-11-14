@@ -15,6 +15,12 @@ class TestEvaluator extends SharedEvaluator {}
 // Recorded from SonarCloud (org.folio:ui-users, branch master) by `yarn capture:remote-fixtures --sonar`: overall coverage 77.5%.
 const UI_USERS = loadRemoteFixture('sonarcloud-ui-users');
 const UI_USERS_COMMIT = '31d7f0f35f69c87fe1fa9fdf68c1c2f479e551b1';
+const technologyRows = (details: string) => {
+  const rows = details.split('\n');
+  const at = rows.indexOf('Test technologies:');
+  const end = rows.findIndex((row, index) => index > at && !row.startsWith('  '));
+  return rows.slice(at + 1, end < 0 ? undefined : end);
+};
 const MEASURES_URL = (repo: string) => `https://sonarcloud.io/api/measures/component?component=org.folio%3A${repo}&metricKeys=coverage%2Cline_coverage%2Cbranch_coverage%2Clines_to_cover%2Cuncovered_lines%2Cconditions_to_cover%2Cuncovered_conditions%2Cduplicated_lines_density&branch=master`;
 const COMPONENT_URL = (repo: string) => `https://sonarcloud.io/api/components/show?component=org.folio%3A${repo}`;
 
@@ -350,7 +356,10 @@ describe('S013 unit test coverage and test technologies', () => {
       const passing = await evaluate(await repository('mod-x', files), { responses: sonarResponses('mod-x', FULL_MEASURES('85.0')), commit: UI_USERS_COMMIT });
       expect(passing.status).toBe(EvaluationStatus.PASS);
       expect(passing.evidence).toBe('S013 pass: SonarCloud reports 85.0% test coverage, meeting the required 80%. The tests use JUnit, which is an officially supported technology.');
-      expect(passing.details).toContain('  - JUnit (org.junit.jupiter:junit-jupiter in server/pom.xml, test scope): supported');
+      expect(technologyRows(passing.details!)).toEqual([
+        '  - JUnit (org.junit.jupiter:junit-jupiter in server/pom.xml, test scope): supported ("JUnit guidance")',
+        '  - Mockito (org.mockito:mockito-core in pom.xml, test scope): testing helper, not covered by the supported-technologies page'
+      ]);
       expect(passing.details!.split('\n')[0]).toBe("What to do: Nothing; SonarCloud's overall coverage is at least 80%, and the tests use officially supported technologies.");
 
       const withTestNg = await evaluate(await repository('mod-y', {
@@ -358,7 +367,38 @@ describe('S013 unit test coverage and test technologies', () => {
         'server/pom.xml': files['server/pom.xml'].replace('</dependencies>', '<dependency><groupId>org.testng</groupId><artifactId>testng</artifactId><scope>test</scope></dependency></dependencies>')
       }), { responses: sonarResponses('mod-y', FULL_MEASURES('85.0')), commit: UI_USERS_COMMIT });
       expect(withTestNg.status).toBe(EvaluationStatus.MANUAL);
-      expect(withTestNg.evidence).toContain('The tests use JUnit and TestNG, and the supported-technologies page does not list TestNG.');
+      expect(withTestNg.evidence).toBe('S013 manual: SonarCloud reports 85.0% test coverage, meeting the required 80%. The tests use JUnit and TestNG, and the supported-technologies page does not list TestNG.');
+    });
+
+    it.each([
+      ['@bigtest/mocha', 'ui-mocha'],
+      ['@bigtest/cli', 'ui-cli']
+    ])('counts %s as a BigTest runner', async (runnerPackage, name) => {
+      const repo = await repository(name, {
+        'package.json': { name: '@folio/odd', devDependencies: { jest: '^29.7.0', [runnerPackage]: '^0.9.0', '@bigtest/interactor': '^0.9.0' } },
+        'yarn.lock': JEST_LOCKFILE
+      });
+      const result = await evaluate(repo, { responses: sonarResponses(name, FULL_MEASURES('85.0')), commit: UI_USERS_COMMIT });
+      expect(result.status).toBe(EvaluationStatus.MANUAL);
+      expect(result.evidence).toBe('S013 manual: SonarCloud reports 85.0% test coverage, meeting the required 80%. The tests use Jest and BigTest, and the supported-technologies page does not list BigTest.');
+      expect(technologyRows(result.details!)).toEqual([
+        '  - Jest 29.7.0 (jest in package.json, devDependencies): supported ("Jest should be 29 or greater")',
+        `  - BigTest (${runnerPackage} in package.json, devDependencies): not listed on the supported-technologies page`,
+        '  - BigTest (@bigtest/interactor in package.json, devDependencies): testing helper, not covered by the supported-technologies page'
+      ]);
+    });
+
+    it('shows helper-only @bigtest packages without counting them as a runner', async () => {
+      const repo = await repository('ui-odd', {
+        'package.json': { name: '@folio/odd', devDependencies: { jest: '^29.7.0', '@bigtest/interactor': '^0.9.0', '@bigtest/mirage': '^0.0.1' } },
+        'yarn.lock': JEST_LOCKFILE
+      });
+      const result = await evaluate(repo, { responses: sonarResponses('ui-odd', FULL_MEASURES('85.0')), commit: UI_USERS_COMMIT });
+      expect(result.status).toBe(EvaluationStatus.PASS);
+      expect(technologyRows(result.details!)).toEqual([
+        '  - Jest 29.7.0 (jest in package.json, devDependencies): supported ("Jest should be 29 or greater")',
+        '  - BigTest (@bigtest/interactor in package.json, devDependencies; @bigtest/mirage in package.json, devDependencies): testing helper, not covered by the supported-technologies page'
+      ]);
     });
 
     it('never fails a module only for having no tests: it is manual unless its coverage fails', async () => {

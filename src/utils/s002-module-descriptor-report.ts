@@ -9,7 +9,7 @@ const GRADLE_TEMPLATE_HINT = 'usually service/src/main/okapi/ModuleDescriptor-te
 const MAX_BUILD_ERROR_LINES = 40;
 const MAX_BUILD_ERROR_LINE_LENGTH = 500;
 const LOG_LEVEL_TAG = /^\s*\[[A-Z]+\]/;
-const TRUNCATION_MARKER = /^\[output truncated to \d+ bytes\]$/;
+const TRUNCATION_MARKER = /^\[output truncated(?: to \d+ bytes|: kept the last \d+ of \d+ bytes)\]$/;
 // Maven "[ERROR]", yarn/npm "error"/"ERR!", and Node exception lines such as "TypeError: ...".
 const ERROR_LINE = /^\s*(?:\[(?:ERROR|FATAL)\]|(?:npm )?ERR!|error\b|\w*Error:)/i;
 const UNCERTAIN_ARTIFACT_STATUSES = new Set<ModuleDescriptorArtifact['status']>([
@@ -171,7 +171,8 @@ function formatBuildErrorLines(artifact: ModuleDescriptorArtifact): string[] {
 
   // Maven reports failures on stdout, and Gradle and yarn on stderr; put that stream last so the tail keeps the failure.
   const command = artifact.command ?? artifact.installCommand;
-  const streams = artifact.strategy === 'maven-generation'
+  const maven = artifact.strategy === 'maven-generation';
+  const streams = maven
     ? [command?.stderr, command?.stdout]
     : [command?.stdout, command?.stderr];
   const printed = streams
@@ -186,7 +187,8 @@ function formatBuildErrorLines(artifact: ModuleDescriptorArtifact): string[] {
   if (!output.length) {
     return [];
   }
-  const cutOff = Boolean(command?.stdoutTruncated || command?.stderrTruncated);
+  // module-descriptor-artifact.ts runs Maven with keepStdoutTail, so only a cut to any other stream loses the end of the build.
+  const cutOff = Boolean((!maven && command?.stdoutTruncated) || command?.stderrTruncated);
 
   // The end of the output usually holds the actual failure.
   // The report shows long lists collapsed to their first few items, so list only the error lines when there are any.
@@ -195,7 +197,6 @@ function formatBuildErrorLines(artifact: ModuleDescriptorArtifact): string[] {
   const shown = (errorLines.length ? errorLines : tail).map(line =>
     line.length > MAX_BUILD_ERROR_LINE_LENGTH ? `${line.slice(0, MAX_BUILD_ERROR_LINE_LENGTH)}… (line shortened)` : line
   );
-  // The runner keeps the start of each stream, so when it cut the output off, the true end of the build is missing.
   const cutOffNote = 'the build printed more than the evaluator keeps, so the final lines are missing';
   const heading = errorLines.length
     ? cutOff
