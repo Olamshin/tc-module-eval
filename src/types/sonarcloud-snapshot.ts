@@ -101,4 +101,5 @@ export interface SonarCloudSnapshot {
 /** Whether a snapshot can be judged; sameCommit says whether its analysis is of the evaluated commit even when it cannot. */
 export type SonarFreshness =
   | { fresh: true }
-  | { fresh: false; reason: 'no-analysis' | 'unknown-commit' | 'no-revision' | 'different-commit' | 'recheck-failed' | 'reanalysed' | 'analysis-pending' | 'short-branch'; sameCommit: boolean; message: string };
+  | { fresh: false; reason: 'no-analysis' | 'unknown-commit' | 'no-revision' | 'different-commit'; sameCommit: false; message: string }
+  | { fresh: false; reason: 'recheck-failed' | 'reanalysed' | 'analysis-pending' | 'short-branch'; sameCommit: true; message: string };
