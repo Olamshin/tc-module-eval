@@ -168,6 +168,8 @@ describe('S013 unit test coverage and test technologies', () => {
       const processing = await evaluate(repo, { responses: pending, commit: UI_USERS_COMMIT });
       expect(processing.status).toBe(EvaluationStatus.MANUAL);
       expect(processing.evidence).toContain("SonarCloud's coverage cannot be used: SonarCloud was processing a new analysis of branch master");
+      expect(processing.details).toContain('commit 31d7f0f, the commit evaluated here):');
+      expect(processing.details).toContain("Rerun the evaluation, or check the evaluated commit's coverage by hand.");
 
       // SonarCloud answers the re-read of the latest analysis with a different one.
       const reanalysed = sonarResponses('ui-users');

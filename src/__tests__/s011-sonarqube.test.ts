@@ -355,6 +355,38 @@ describe('S011 SonarQube findings', () => {
         expect(result.requested.filter(url => url.includes('project_analyses/search') || url.includes('branch=master'))).toEqual([]);
       });
 
+      it('says the analysis is of the evaluated commit and what a reviewer checks, never to wait for a new analysis', async () => {
+        const result = await evaluate(await repo('mod-search'), { responses: MOD_SEARCH_V6_0_11, branch: 'v6.0.11', commit });
+
+        expect(result.details).toContain('  - Analysis: 2026-10-29, commit af43b82 (the commit evaluated here)');
+        expect(result.details).toContain("Findings: not judged, because a short-lived branch's counts cover only the code that differs from its merge branch");
+        expect(result.details).toContain("Review the module's issues, hotspots and duplication in SonarCloud (https://sonarcloud.io/project/overview?id=org.folio%3Amod-search) by hand; this branch's analysis covers only the code that differs from its merge branch.");
+        expect(result.details).not.toContain('has analysed the evaluated commit');
+        expect(result.details).not.toContain('not of the evaluated commit');
+      });
+
+      it('is stale, not short-branch, when the tag analysis is of another commit', async () => {
+        const replay = replayTransport(MOD_SEARCH_V6_0_11);
+        const snapshot = await collectSonarCloudSnapshot(replay.transport, 'org.folio:mod-search', 'v6.0.11');
+
+        expect(sonarSnapshotFreshness(snapshot, 'b'.repeat(40))).toMatchObject({ fresh: false, reason: 'different-commit', sameCommit: false });
+        expect(sonarSnapshotFreshness(snapshot, commit)).toMatchObject({ fresh: false, reason: 'short-branch', sameCommit: true });
+      });
+
+      it('leaves S013 manual with its own reason and the commit named as evaluated', async () => {
+        const directory = await repo('mod-search');
+        const replay = replayTransport(MOD_SEARCH_V6_0_11);
+        const run = createEvaluationRun({ repositoryPath: directory, repositoryName: 'mod-search', language: 'java', criteriaFilter: ['S013'],
+          repositoryCommit: commit, requestedBranch: 'v6.0.11', remoteLookups: replay.transport });
+        const s013 = await new TestEvaluator('java').evaluateCriterion('S013', directory, run);
+
+        expect(s013.status).toBe(EvaluationStatus.MANUAL);
+        expect(s013.evidence).toContain("SonarCloud's analysis of the evaluated commit is on short-lived branch v6.0.11, scoped against master, so the tool shows its coverage for information and does not judge it.");
+        expect(s013.details).toContain('commit af43b82, the commit evaluated here):');
+        expect(s013.details).toContain("Check by hand that the module's overall test coverage in SonarCloud is at least 80%.");
+        expect(s013.evidence).not.toContain('issue and hotspot');
+      });
+
       it('keeps its measures as information, and S013 cannot use them', async () => {
         const replay = replayTransport(MOD_SEARCH_V6_0_11);
         const snapshot = await collectSonarCloudSnapshot(replay.transport, 'org.folio:mod-search', 'v6.0.11');

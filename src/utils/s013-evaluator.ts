@@ -132,7 +132,10 @@ function coverageHalf(inputs: S013Inputs): S013Coverage {
   // Stale data cannot pass or fail: the evaluated commit may have more or fewer tests than the analysed one.
   const freshness = sonarSnapshotFreshness(snapshot, inputs.repositoryCommit);
   if (!freshness.fresh) {
-    return manual('stale', `SonarCloud's coverage cannot be used: ${reportText(freshness.message)}`, { fresh: false });
+    const why = freshness.reason === 'short-branch'
+      ? `SonarCloud's analysis of the evaluated commit is on short-lived branch ${reportText(snapshot.branch ?? '')}, scoped against ${reportText(snapshot.shortBranch?.mergeBranch ?? 'its merge branch')}, so the tool shows its coverage for information and does not judge it.`
+      : `SonarCloud's coverage cannot be used: ${reportText(freshness.message)}`;
+    return manual('stale', why, { fresh: freshness.sameCommit, staleReason: freshness.reason });
   }
   if (snapshot.measuresProblem) {
     return manual('unreadable', `No coverage figure is available: ${reportText(snapshot.measuresProblem)}`, { fresh: true });
@@ -392,7 +395,11 @@ function whatToDo(analysis: S013Analysis): string {
       break;
     }
     case 'stale':
-      actions.push('Rerun the evaluation once SonarCloud has analysed the evaluated commit, or check that commit\'s coverage by hand.');
+      actions.push(coverage.staleReason === 'short-branch'
+        ? `Check by hand that the module's overall test coverage in SonarCloud is at least ${REQUIRED_COVERAGE}%.`
+        : coverage.fresh
+          ? 'Rerun the evaluation, or check the evaluated commit\'s coverage by hand.'
+          : 'Rerun the evaluation once SonarCloud has analysed the evaluated commit, or check that commit\'s coverage by hand.');
       break;
     case 'meets':
       break;

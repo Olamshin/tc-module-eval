@@ -73,32 +73,33 @@ export async function getSonarCloudSnapshot(run: EvaluationRun, repoPath: string
  */
 export function sonarSnapshotFreshness(snapshot: SonarCloudSnapshot, repositoryCommit: string | undefined): SonarFreshness {
   const analysis = snapshot.analysis;
-  if (!analysis) return { fresh: false, reason: 'no-analysis', message: snapshot.problem ?? 'SonarCloud has no analysis to compare.' };
+  if (!analysis) return { fresh: false, reason: 'no-analysis', sameCommit: false, message: snapshot.problem ?? 'SonarCloud has no analysis to compare.' };
   const analysed = analysis.revision ? `commit ${analysis.revision.slice(0, 7)}` : 'an unrecorded commit';
+  const on = `SonarCloud's latest analysis of branch ${snapshot.branch} (${analysis.date.slice(0, 10)}) is of ${analysed}`;
+  if (!repositoryCommit) return { fresh: false, reason: 'unknown-commit', sameCommit: false, message: `${on}, and the evaluated commit is not known, so the tool cannot tell whether its findings apply.` };
+  if (!analysis.revision) return { fresh: false, reason: 'no-revision', sameCommit: false, message: `${on}, so the tool cannot tell whether its findings apply to the evaluated commit ${repositoryCommit.slice(0, 7)}.` };
+  if (analysis.revision !== repositoryCommit) {
+    return { fresh: false, reason: 'different-commit', sameCommit: false, message: `${on}, not the evaluated commit ${repositoryCommit.slice(0, 7)}, so its findings may not apply.` };
+  }
   if (snapshot.shortBranch) {
     const against = snapshot.shortBranch.mergeBranch ?? 'its merge branch';
     return {
       fresh: false,
       reason: 'short-branch',
+      sameCommit: true,
       message: `SonarCloud's analysis of branch ${snapshot.branch} (${analysis.date.slice(0, 10)}, ${analysed}) is of a short-lived branch scoped against ${against}, `
         + `so its issue and hotspot counts cover only the code that differs from ${against}, not the whole module.`
     };
   }
-  const on = `SonarCloud's latest analysis of branch ${snapshot.branch} (${analysis.date.slice(0, 10)}) is of ${analysed}`;
-  if (!repositoryCommit) return { fresh: false, reason: 'unknown-commit', message: `${on}, and the evaluated commit is not known, so the tool cannot tell whether its findings apply.` };
-  if (!analysis.revision) return { fresh: false, reason: 'no-revision', message: `${on}, so the tool cannot tell whether its findings apply to the evaluated commit ${repositoryCommit.slice(0, 7)}.` };
-  if (analysis.revision !== repositoryCommit) {
-    return { fresh: false, reason: 'different-commit', message: `${on}, not the evaluated commit ${repositoryCommit.slice(0, 7)}, so its findings may not apply.` };
-  }
   const recheck = snapshot.recheck;
   if (!recheck || recheck.problem || !recheck.key) {
-    return { fresh: false, reason: 'recheck-failed', message: `The tool could not confirm that SonarCloud did not re-analyse the project while it was being read${recheck?.problem ? `: ${recheck.problem}` : '.'}` };
+    return { fresh: false, reason: 'recheck-failed', sameCommit: true, message: `The tool could not confirm that SonarCloud did not re-analyse the project while it was being read${recheck?.problem ? `: ${recheck.problem}` : '.'}` };
   }
   if (recheck.pending) {
-    return { fresh: false, reason: 'analysis-pending', message: `SonarCloud was processing a new analysis of branch ${snapshot.branch} while the tool was reading it, so its answers may mix two analyses.` };
+    return { fresh: false, reason: 'analysis-pending', sameCommit: true, message: `SonarCloud was processing a new analysis of branch ${snapshot.branch} while the tool was reading it, so its answers may mix two analyses.` };
   }
   if (recheck.key !== analysis.key) {
-    return { fresh: false, reason: 'reanalysed', message: `SonarCloud analysed the project again while the tool was reading it (${analysis.date.slice(0, 10)} and ${(recheck.date ?? '').slice(0, 10)}), so its answers may mix two analyses.` };
+    return { fresh: false, reason: 'reanalysed', sameCommit: true, message: `SonarCloud analysed the project again while the tool was reading it (${analysis.date.slice(0, 10)} and ${(recheck.date ?? '').slice(0, 10)}), so its answers may mix two analyses.` };
   }
   return { fresh: true };
 }

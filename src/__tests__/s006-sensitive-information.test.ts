@@ -2090,6 +2090,9 @@ describe('S006 context labels and type exports', () => {
     expect(classifyS006SourceContext('descriptors/ModuleDescriptor-template.json')).toBe('sample_or_example');
     expect(classifyS006SourceContext('docker-compose.yml')).toBe('local_docker_defaults');
     expect(classifyS006SourceContext('generated/openapi.json')).toBe('generated_content');
+    expect(classifyS006SourceContext('grails-app/conf/application.yml', 'grails:\n  codegen:\n    defaultPackage: org.folio\ngrails.codegen.defaultPackage: org.folio\n')).not.toBe('generated_content');
+    expect(classifyS006SourceContext('src/main/java/Api.java', '// Generated with swagger-codegen\n')).toBe('generated_content');
+    expect(classifyS006SourceContext('src/main/java/Tables.java', '// Built by jooq-codegen 3.19\n')).toBe('generated_content');
     expect(classifyS006SourceContext('unclassified.file')).toBe('unknown');
   });
 

@@ -11,8 +11,9 @@ import {
 } from '../types';
 import { FRAMEWORK_LABELS } from './b001-descriptor-template';
 import { descriptorEndpoints, EndpointMatcher, endpointLibraries, endpointMatcher, gapCovers, lookup, pathIndex, uniqueEndpoints } from './backend-endpoints';
+import { generatedInterfaceImplementations } from './b003-endpoint-implementations';
 import { endpointFramework } from './backend-evidence';
-import { HEALTH_ROUTE, routerRoutes, sourceRoutes, withoutComments } from './backend-routes';
+import { HEALTH_ROUTE, routerRoutes, SourceRoute, sourceRoutes, withoutComments } from './backend-routes';
 import { frontendChecklist, renderFrontendChecklistLines } from './frontend-checklist';
 import { count, listText, overflowLine, reportPath, reportText, unique } from './report-text';
 
@@ -59,8 +60,12 @@ export function evaluateB006(evidence: BackendEvidence, apiSpecs: BackendApiSpec
     const errorControllers = new Set(evidence.snapshot.files
       .filter(file => file.content.includes('ErrorController') && ERROR_CONTROLLER.test(withoutComments(file.content)))
       .map(file => file.path));
-    matchers = uniqueEndpoints(scan.routes.filter(route => route.path !== HEALTH_ROUTE && !(route.path === ERROR_ROUTE && errorControllers.has(route.file)))).map(endpointMatcher);
-    endpointSource = spring ? 'router routes and Spring mapping annotations in src/main' : 'router routes in src/main';
+    matchers = uniqueEndpoints([...scan.routes, ...(spring ? inheritedRoutes(evidence, apiSpecs) : [])]
+      .filter(route => route.path !== HEALTH_ROUTE && !(route.path === ERROR_ROUTE && errorControllers.has(route.file))))
+      .map(endpointMatcher);
+    endpointSource = spring
+      ? 'router routes and Spring mapping annotations in src/main, and the OpenAPI operations of the generated interfaces committed classes implement'
+      : 'router routes in src/main';
     if (!matchers.length) {
       return result(EvaluationStatus.MANUAL, 'no-routes',
         `The repository is an edge module, but no router route${spring ? ' or Spring mapping' : ''} with a readable path was found, so its endpoints are not known.`,
@@ -268,4 +273,16 @@ function specIndex(specs: BackendApiSpec[]) {
 function specLookup(index: ReturnType<typeof specIndex>, matcher: EndpointMatcher): { documented: string[]; partial: string[] } {
   const { documented, partial } = lookup(index, matcher);
   return { documented: unique(documented.map(operation => operation.file)), partial: unique(partial.map(operation => operation.file)) };
+}
+
+/**
+ * The OpenAPI operations a Spring edge module serves through the interfaces openapi-generator builds from its specs:
+ * the controller implements the interface and carries no mapping annotation of its own. Each is placed at the class.
+ */
+function inheritedRoutes(evidence: BackendEvidence, apiSpecs: BackendApiSpecs): SourceRoute[] {
+  const { implementing } = generatedInterfaceImplementations(evidence);
+  return apiSpecs.specs.filter(spec => spec.format === 'openapi').flatMap(spec => spec.operations.flatMap(operation => {
+    const [implementation] = implementing({ method: operation.method, path: operation.path, file: spec.file, operation, format: spec.format });
+    return implementation ? [{ method: operation.method, path: operation.path, file: implementation.file, line: implementation.line }] : [];
+  }));
 }
