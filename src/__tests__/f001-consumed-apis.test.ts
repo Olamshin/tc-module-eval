@@ -115,6 +115,30 @@ describe('F001 consumed interfaces', () => {
     ]);
   });
 
+  it('reads null and both branches of a conditional as GET options, as ui-inventory\'s ViewSource passes them', async () => {
+    writePackage({ okapiInterfaces: { circulation: '14.0' } });
+    write('src/Session.js', [
+      'export default class Session {',
+      "  static manifest = Object.freeze({ loans: { type: 'okapi', path: 'circulation/loans' } });",
+      '  show = (marcType, tenant) => {',
+      "    const options = marcType === 'holdings' ? null : { headers: { 'x-okapi-tenant': tenant } };",
+      '    this.props.mutator.loans.GET(options);',
+      '    this.props.mutator.loans.GET(undefined);',
+      "    this.props.mutator.loans.GET(marcType ? { path: 'circulation/end-patron-action-session' } : null);",
+      '  };',
+      '}'
+    ].join('\n'));
+    commit();
+
+    const { analysis } = await evaluate();
+
+    expect(analysis.unresolvedSites).toEqual([]);
+    expect(analysis.undeclared.map(use => [use.id, use.sites.map(site => `${site.path}:${site.line} ${site.method} ${site.requestPath}`)])).toEqual([
+      ['patron-action-session', ['src/Session.js:7 GET circulation/end-patron-action-session']]
+    ]);
+    expect(analysis.siteCount).toBe(2);
+  });
+
   it('stays manual, and names the candidates, when a request cannot be read or could reach several interfaces', async () => {
     writePackage({ okapiInterfaces: { users: '16.5', configuration: '2.0' } });
     // A path constant in a test fixture is not production code, so the tool does not read it.
