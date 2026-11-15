@@ -82,12 +82,12 @@ class PathResolver {
         const callee = node.expression;
         const [first, options] = node.arguments;
         if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'GET' && isMutatorResource(callee.expression)) {
-          const path = first && this.optionsPath(first, file, 0);
-          if (path && 'unresolved' in path) {
+          const paths = first ? this.optionsPaths(first, file, 0) : [];
+          if ('unresolved' in paths) {
             sites.push({ path: file.path, line: lineOf(file.sourceFile, node.getStart(file.sourceFile)), kind: 'stripes-connect', method: 'GET',
-              expression: oneLine(first.getText(file.sourceFile)), unresolved: path.unresolved });
-          } else if (path) {
-            add(node, 'stripes-connect', 'GET', path.expression, [], 0, path.file);
+              expression: oneLine(first.getText(file.sourceFile)), unresolved: paths.unresolved });
+          } else {
+            for (const path of paths) add(node, 'stripes-connect', 'GET', path.expression, [], 0, path.file);
           }
         } else if (ts.isPropertyAccessExpression(callee) && KY_METHODS.has(callee.name.text)) {
           const prefix = this.kyPrefix(callee.expression, file, 0);
@@ -131,29 +131,38 @@ class PathResolver {
     return KY_INSTANCE_NAMES.has(node.text) ? [] : undefined;
   }
 
-  private optionsPath(expression: ts.Expression, file: FrontendSourceFile, depth: number):
-    { expression: ts.Expression; file: FrontendSourceFile } | { unresolved: string } | undefined {
+  /** The paths a mutator GET's options name: none when they name no path, so the manifest path is requested. */
+  private optionsPaths(expression: ts.Expression, file: FrontendSourceFile, depth: number):
+    Array<{ expression: ts.Expression; file: FrontendSourceFile }> | { unresolved: string } {
     const unreadable = { unresolved: 'the options passed to GET could not be read' };
     const node = unwrap(expression);
     if (depth > MAX_DEPTH) return { unresolved: 'its constants refer to each other too deeply' };
+    if (node.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(node) && node.text === 'undefined')) return [];
+    if (ts.isConditionalExpression(node)) {
+      const whenTrue = this.optionsPaths(node.whenTrue, file, depth + 1);
+      const whenFalse = this.optionsPaths(node.whenFalse, file, depth + 1);
+      if ('unresolved' in whenTrue) return whenTrue;
+      return 'unresolved' in whenFalse ? whenFalse : [...whenTrue, ...whenFalse];
+    }
     if (ts.isIdentifier(node)) {
       const resolved = this.resolveIdentifier(node, file, depth);
       if (resolved.kind === 'unresolved') return { unresolved: resolved.reason };
-      return resolved.kind === 'value' ? this.optionsPath(resolved.node, resolved.file, depth + 1) : unreadable;
+      return resolved.kind === 'value' ? this.optionsPaths(resolved.node, resolved.file, depth + 1) : unreadable;
     }
     if (!ts.isObjectLiteralExpression(node)) return unreadable;
-    let path: ReturnType<PathResolver['optionsPath']>;
+    let paths: ReturnType<PathResolver['optionsPaths']> = [];
     for (const item of node.properties) {
       if (ts.isSpreadAssignment(item)) {
-        path = this.optionsPath(item.expression, file, depth + 1) ?? path;
+        const spread = this.optionsPaths(item.expression, file, depth + 1);
+        if ('unresolved' in spread || spread.length) paths = spread;
       } else if (item.name && (ts.isIdentifier(item.name) || ts.isStringLiteral(item.name)) && item.name.text === 'path') {
-        if (ts.isPropertyAssignment(item)) path = { expression: item.initializer, file };
-        else if (ts.isShorthandPropertyAssignment(item)) path = { expression: item.name, file };
+        if (ts.isPropertyAssignment(item)) paths = [{ expression: item.initializer, file }];
+        else if (ts.isShorthandPropertyAssignment(item)) paths = [{ expression: item.name, file }];
       } else if (item.name && ts.isComputedPropertyName(item.name)) {
-        path = unreadable;
+        paths = unreadable;
       }
     }
-    return path;
+    return paths;
   }
 
   private functionOf(node: ts.Expression, file: FrontendSourceFile): ts.FunctionLikeDeclaration | undefined {
