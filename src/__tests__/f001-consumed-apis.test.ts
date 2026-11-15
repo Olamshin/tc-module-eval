@@ -89,6 +89,23 @@ describe('F001 consumed interfaces', () => {
     expect(analysis.siteCount).toBe(2);
   });
 
+  it('keeps a GET unresolved when one branch of its options cannot be read', async () => {
+    writePackage({ okapiInterfaces: { circulation: '14.0' } });
+    write('src/Session.js', [
+      'export default class Session {',
+      "  static manifest = Object.freeze({ loans: { type: 'okapi', path: 'circulation/loans' } });",
+      '  show = (marcType, options) => {',
+      '    this.props.mutator.loans.GET(marcType ? null : options);',
+      '  };',
+      '}'
+    ].join('\n'));
+    commit();
+
+    const { analysis } = await evaluate();
+
+    expect(analysis.unresolvedSites.map(site => `${site.path}:${site.line}`)).toEqual(['src/Session.js:4']);
+  });
+
   it('follows mutator GET options through constants and spreads, and leaves options it cannot read to the reviewer', async () => {
     writePackage({ okapiInterfaces: { circulation: '14.0' } });
     write('src/Session.js', [
