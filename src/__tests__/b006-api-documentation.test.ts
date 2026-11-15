@@ -393,9 +393,13 @@ describe('B006 API documentation', () => {
       'src/main/java/org/example/InventoryController.java': '@RestController\npublic class InventoryController implements InventoryApi {\n'
         + '  @Override public ResponseEntity<String> getInstances(String query) { return null; }\n'
         + '  @GetMapping("/inventory/extra") public String extra() { return null; }\n}\n',
+      // Okapi checks /admin/health itself, so B006 leaves it out however the module serves it.
+      'src/main/java/org/example/AdminController.java': '@RestController\npublic class AdminController implements AdminApi {\n'
+        + '  @Override public ResponseEntity<String> getHealth() { return null; }\n}\n',
       // openapi-generator gives getItems a default method that answers 501, so the controller does not serve it.
       'src/main/resources/swagger.api/edge-example.yaml': 'openapi: 3.0.0\npaths:\n  /inventory/instances:\n    get:\n      operationId: getInstances\n'
         + '  /inventory/items:\n    get:\n      operationId: getItems\n'
+        + '  /admin/health:\n    get:\n      operationId: getHealth\n'
     });
 
     const { result, analysis } = await b006(root);

@@ -60,10 +60,9 @@ export function evaluateB006(evidence: BackendEvidence, apiSpecs: BackendApiSpec
     const errorControllers = new Set(evidence.snapshot.files
       .filter(file => file.content.includes('ErrorController') && ERROR_CONTROLLER.test(withoutComments(file.content)))
       .map(file => file.path));
-    matchers = uniqueEndpoints([
-      ...scan.routes.filter(route => route.path !== HEALTH_ROUTE && !(route.path === ERROR_ROUTE && errorControllers.has(route.file))),
-      ...(spring ? inheritedRoutes(evidence, apiSpecs) : [])
-    ]).map(endpointMatcher);
+    matchers = uniqueEndpoints([...scan.routes, ...(spring ? inheritedRoutes(evidence, apiSpecs) : [])]
+      .filter(route => route.path !== HEALTH_ROUTE && !(route.path === ERROR_ROUTE && errorControllers.has(route.file))))
+      .map(endpointMatcher);
     endpointSource = spring
       ? 'router routes and Spring mapping annotations in src/main, and the OpenAPI operations of the generated interfaces committed classes implement'
       : 'router routes in src/main';

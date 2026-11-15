@@ -40,8 +40,7 @@ const SKIP_DEFAULT_INTERFACE = /<skipDefaultInterface>\s*true\s*<\/skipDefaultIn
 const RMB_IMPLEMENTATION = /(?:^|\/)org\/folio\/rest\/impl\//;
 const CALLABLE = /\b([A-Za-z_$][\w$]*)\s*\(/g;
 
-export type GeneratedInterfaceEntry = { method: string; path: string; file: string; operation: BackendApiOperation; format: BackendApiSpec['format'] };
-type Entry = GeneratedInterfaceEntry;
+type Entry = { method: string; path: string; file: string; operation: BackendApiOperation; format: BackendApiSpec['format'] };
 type Endpoint = PathItem & { interfaceId?: string; specFile?: string };
 
 /**
