@@ -463,6 +463,8 @@ function buildGeneratedOpenCodeConfig(config: CriterionAgentReviewConfig): Recor
   if (config.generatedProvider) {
     generated.provider = {
       [config.generatedProvider.name]: {
+        // OpenCode does not read OPENCODE_ENDPOINT; its providers take their endpoint from options.baseURL.
+        ...(config.endpoint ? { options: { baseURL: config.endpoint } } : {}),
         models: {
           [config.generatedProvider.modelId]: {}
         }
