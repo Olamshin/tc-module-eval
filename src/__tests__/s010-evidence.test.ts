@@ -666,7 +666,7 @@ describe('S010 evidence collection', () => {
       'package.json': JSON.stringify({
         name: '@folio/ui-external-lookup',
         dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' },
-        stripes: { okapiInterfaces: {} }
+        stripes: { actsAs: ['app'], okapiInterfaces: {} }
       }),
       'src/lookup.ts': lookupFile(gate)
     });
@@ -725,7 +725,7 @@ describe('S010 evidence collection', () => {
       'package.json': JSON.stringify({
         name: '@folio/notes',
         dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' },
-        stripes: { okapiInterfaces: { notes: '4.0', users: '16.0' }, optionalOkapiInterfaces: { tags: '1.0' } }
+        stripes: { actsAs: ['app'], okapiInterfaces: { notes: '4.0', users: '16.0' }, optionalOkapiInterfaces: { tags: '1.0' } }
       }),
       'src/index.js': 'export default function Notes() { return null; }'
     });
@@ -740,7 +740,7 @@ describe('S010 evidence collection', () => {
 
   it('does not read co-located tests and mocks as production code', async () => {
     const root = repository({
-      'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: {} }),
+      'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: { actsAs: ['app'] } }),
       'src/Users.test.js': 'import axios from "axios"; fetch(url);',
       'src/Users.spec.tsx': 'const okapi = { url: "" };',
       'src/__mocks__/stripes.js': 'export const mutator = {};',
@@ -755,7 +755,7 @@ describe('S010 evidence collection', () => {
 
   it('diagnoses browser requests whose target is not a literal address', async () => {
     const root = repository({
-      'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: {} }),
+      'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: { actsAs: ['app'] } }),
       'src/lookup.js': 'export const lookup = term => fetch(`https://api.example.org/search?q=${term}`);',
       'src/users.js': 'export const users = url => fetch(`${url}/users`);',
       'src/upload.js': 'export const upload = () => new XMLHttpRequest();',
@@ -898,7 +898,7 @@ describe('S010 evidence collection', () => {
     ...files
   });
   const uiModule = (files: Record<string, string>) => ({
-    'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: {} }),
+    'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: { actsAs: ['app'] } }),
     ...files
   });
   const databaseYaml = (line: string) => ({ 'src/main/resources/application.yml': `spring:\n  datasource:\n${line}` });
@@ -930,7 +930,7 @@ describe('S010 evidence collection', () => {
 
   it('lists at most 1,000 dependency checks and says the list was cut', async () => {
     const root = repository({
-      'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: {} }),
+      'package.json': JSON.stringify({ name: '@folio/x', dependencies: { react: '^18.2.0', '@folio/stripes-core': '^10.0.0' }, stripes: { actsAs: ['app'] } }),
       // Each request is bounded and handled, so without the limit the module would pass.
       'src/hosts.js': [
         'const signal = AbortSignal.timeout(1000);',
