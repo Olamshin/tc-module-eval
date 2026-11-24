@@ -753,7 +753,7 @@ function collectGradleBuildFile(
   // Never put two optional whitespace runs next to each other ("\\s*(?:\\(\\s*)?"): on a long run of spaces the
   // engine tries every split between them, which is quadratic in the build file size.
   const configurationName =
-    '(?:implementation|api|compileOnly|runtimeOnly|annotationProcessor|classpath'
+    '(?<!\\w)(?:implementation|api|compileOnly|runtimeOnly|annotationProcessor|classpath'
     + '|(?:test|testFixtures|integrationTest)(?:Implementation|Api|CompileOnly|RuntimeOnly|AnnotationProcessor))';
   const configuration = `${configurationName}(?:\\s*\\()?\\s*`;
   // Every pattern below starts with the configuration name.
@@ -1608,8 +1608,24 @@ function normalizeGradleJavaVersion(value: string): string {
   return value.startsWith('1_') ? value.slice(2) : value.replace(/_/g, '.');
 }
 
+/**
+ * Matches of a global pattern that start in code. A match starting inside a string literal is dropped and the search
+ * resumes at the next code position, so it cannot consume a declaration after the string.
+ */
 function gradleCodeMatches(content: string, pattern: RegExp, codePositions: Uint8Array): RegExpMatchArray[] {
-  return [...content.matchAll(pattern)].filter(match => codePositions[match.index ?? 0] === 1);
+  const search = new RegExp(pattern.source, pattern.flags);
+  const matches: RegExpMatchArray[] = [];
+  for (let match = search.exec(content); match; match = search.exec(content)) {
+    if (codePositions[match.index] === 1) {
+      matches.push(match);
+      if (match[0] === '') search.lastIndex++;
+      continue;
+    }
+    let next = match.index + 1;
+    while (next < content.length && codePositions[next] !== 1) next++;
+    search.lastIndex = next;
+  }
+  return matches;
 }
 
 function firstGradleCodeMatch(
