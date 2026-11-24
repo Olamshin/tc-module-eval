@@ -298,7 +298,7 @@ Advanced options:
 - `--criterion-agent-auth-store <path>` uses a trusted OpenCode auth store outside the evaluated repository.
 - `--criterion-agent-provider-env <names>` allowlists additional provider credential environment variable names.
 - `--criterion-agent-proxy-env <names>` allowlists proxy environment variable names.
-- `--criterion-agent-endpoint <url>` sets the generated provider's base URL (`provider.<name>.options.baseURL`). With `--criterion-agent-trusted-config`, the trusted config must set the endpoint itself; it can read the value from `{env:OPENCODE_ENDPOINT}`.
+- `--criterion-agent-endpoint <url>` sets the base URL (`provider.<name>.options.baseURL`) of the provider the model selector names, such as `anthropic` in `anthropic/claude-sonnet-5-5`, including with `--criterion-agent-auth-store`. With a model that names no provider, review is unavailable before OpenCode starts. With `--criterion-agent-trusted-config`, the trusted config must set the endpoint itself; it can read the value from `{env:OPENCODE_ENDPOINT}`.
 - `--criterion-agent-endpoint-allowlist <urls>` permits non-HTTPS explicitly trusted endpoint URLs on the same parsed origin.
 - `--criterion-agent-debug-retain-workspace` retains the temporary review workspace and a content-free `agent-debug.json` run trace for local debugging.
 
