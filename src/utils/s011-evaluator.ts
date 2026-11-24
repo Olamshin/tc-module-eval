@@ -115,7 +115,13 @@ export function evaluateS011(inputs: S011Inputs): S011Analysis {
   }
   const freshness = sonarSnapshotFreshness(snapshot, inputs.repositoryCommit);
   if (!freshness.fresh) {
-    return result(EvaluationStatus.MANUAL, `${reportText(freshness.message)} Rerun once SonarCloud has analysed the evaluated commit, or check SonarCloud by hand.${local}`, 'stale-analysis');
+    if (freshness.reason === 'short-branch') {
+      return result(EvaluationStatus.MANUAL, `${reportText(freshness.message)} A reviewer needs to check the module's issues and hotspots in SonarCloud (${key}).${local}`, 'short-branch');
+    }
+    const next = freshness.sameCommit
+      ? 'Rerun the evaluation, or check SonarCloud by hand.'
+      : 'Rerun once SonarCloud has analysed the evaluated commit, or check SonarCloud by hand.';
+    return result(EvaluationStatus.MANUAL, `${reportText(freshness.message)} ${next}${local}`, freshness.sameCommit ? 'unsettled-analysis' : 'stale-analysis');
   }
 
   // Each fail rule is judged from its own evidence, whatever else could not be read.
@@ -240,7 +246,10 @@ function findingLines(analysis: S011Analysis): string[] {
   const rules = analysis.rules;
   const lines: string[] = [];
   if (analysis.gate) {
-    lines.push('Findings: not judged, because the analysis is not of the evaluated commit or could not be read completely');
+    const why = analysis.gate === 'short-branch' ? "a short-lived branch's counts cover only the code that differs from its merge branch"
+      : analysis.gate === 'unsettled-analysis' ? 'SonarCloud may have re-analysed the project while the tool was reading it'
+        : 'the analysis is not of the evaluated commit or could not be read completely';
+    lines.push(`Findings: not judged, because ${why}`);
     return lines;
   }
   const security = maxDefined(snapshot.securityIssues.total, snapshot.vulnerabilities.total);
@@ -362,6 +371,8 @@ function whatToDo(analysis: S011Analysis): string {
     case 'remote-lookups-off': return `${RERUN_HINT} so the tool can read the module's SonarCloud analysis, or check it in SonarCloud by hand.${suppressions}`;
     case 'no-project': return `Check by hand that the module has no security issues, no high or blocker issues and no more than 3% duplication, for example by running SonarCloud on it.${suppressions}`;
     case 'stale-analysis': return `Rerun once SonarCloud has analysed the evaluated commit, or review the findings in SonarCloud${link} by hand.${suppressions}`;
+    case 'unsettled-analysis': return `Rerun the evaluation, or review the findings in SonarCloud${link} by hand.${suppressions}`;
+    case 'short-branch': return `Review the module's issues, hotspots and duplication in SonarCloud${link} by hand; this branch's analysis covers only the code that differs from its merge branch.${suppressions}`;
     case 'sonarcloud-unavailable': return `Rerun later, or review the module in SonarCloud${link} by hand.${suppressions}`;
   }
   if (analysis.status === EvaluationStatus.FAIL) {

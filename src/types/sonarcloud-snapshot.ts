@@ -75,6 +75,8 @@ export interface SonarCloudSnapshot {
   problem?: string;
   branch?: string;
   branchIsMain?: boolean;
+  /** Set for a short-lived (SHORT) branch, whose analysis covers only the code that differs from its merge branch. */
+  shortBranch?: { mergeBranch?: string };
   /** The --branch value when SonarCloud has no analysis of it, so the main branch was read instead. */
   requestedBranchNotAnalysed?: string;
   analysis?: { key: string; date: string; revision?: string };
@@ -96,6 +98,8 @@ export interface SonarCloudSnapshot {
   remoteEvidence: RemoteEvidenceRecord[];
 }
 
+/** Whether a snapshot can be judged; sameCommit says whether its analysis is of the evaluated commit even when it cannot. */
 export type SonarFreshness =
   | { fresh: true }
-  | { fresh: false; reason: 'no-analysis' | 'unknown-commit' | 'no-revision' | 'different-commit' | 'recheck-failed' | 'reanalysed' | 'analysis-pending'; message: string };
+  | { fresh: false; reason: 'no-analysis' | 'unknown-commit' | 'no-revision' | 'different-commit'; sameCommit: false; message: string }
+  | { fresh: false; reason: 'recheck-failed' | 'reanalysed' | 'analysis-pending' | 'short-branch'; sameCommit: true; message: string };

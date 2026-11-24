@@ -3,7 +3,7 @@ import { RemoteEvidenceRecord } from './remote-evidence';
 import { S007PolicyDiagnostic } from './s007-officially-supported-technologies';
 import { BuildEvidenceDiagnostic, TestTechnologyKind } from './s012-build-tools';
 import { S011ScopeSetting } from './s011-sonarqube';
-import { SonarProjectSetting } from './sonarcloud-snapshot';
+import { SonarFreshness, SonarProjectSetting } from './sonarcloud-snapshot';
 
 /** One half of S013: "ok" lets the criterion pass, "manual" and "fail" decide it. */
 export type S013HalfOutcome = 'ok' | 'manual' | 'fail';
@@ -21,6 +21,8 @@ export interface S013Coverage {
   analysis?: { date: string; revision?: string };
   /** Whether the analysis is of the evaluated commit; absent when there is no analysis. */
   fresh?: boolean;
+  /** Why a stale analysis could not be used, when reason is stale. */
+  staleReason?: Extract<SonarFreshness, { fresh: false }>['reason'];
   /** The SonarCloud measures read, by metric key. A metric SonarCloud did not return is absent. */
   measures: Record<string, number>;
   /** FOLIO shared workflows the repository builds with that do not run SonarCloud, such as gradle.yml. */

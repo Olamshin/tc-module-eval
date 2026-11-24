@@ -1,0 +1,377 @@
+{
+  "capturedAt": "2026-11-13T18:38:40.393Z",
+  "description": "SonarCloud org.folio:mod-search branch v6.0.11 (a SHORT branch) as S011 reads it, evaluated at mod-search commit af43b821ad70322c2b10f88be8ee53625de6c059, trimmed to the fields the evaluator reads",
+  "responses": {
+    "https://sonarcloud.io/api/components/show?component=org.folio%3Amod-search": {
+      "status": 200,
+      "body": {
+        "component": {
+          "organization": "folio-org",
+          "key": "org.folio:mod-search",
+          "name": "mod-search",
+          "description": "FOLIO search service",
+          "qualifier": "TRK",
+          "analysisDate": "2026-11-09T09:03:56+0000",
+          "tags": [],
+          "visibility": "public",
+          "leakPeriodDate": "2026-10-12T07:20:15+0000",
+          "version": "6.1.0-SNAPSHOT"
+        },
+        "ancestors": []
+      }
+    },
+    "https://sonarcloud.io/api/project_branches/list?project=org.folio%3Amod-search": {
+      "status": 200,
+      "body": {
+        "branches": [
+          {
+            "name": "master",
+            "isMain": true,
+            "type": "LONG",
+            "analysisDate": "2026-11-09T09:03:56+0000",
+            "commit": {
+              "sha": "9d460bff56d8c39f6cd623a6a81c17ef59347505"
+            }
+          },
+          {
+            "name": "v6.0.11",
+            "isMain": false,
+            "type": "SHORT",
+            "mergeBranch": "master",
+            "analysisDate": "2026-10-29T14:46:20+0000",
+            "commit": {
+              "sha": "af43b821ad70322c2b10f88be8ee53625de6c059"
+            }
+          },
+          {
+            "name": "release-1.4.1",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-07-20T08:45:30+0000",
+            "commit": {
+              "sha": "95274ba006f1fd1a331f03bd1088dfd8b4a1d2e6"
+            }
+          },
+          {
+            "name": "release-1.3.1",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-07-12T08:15:51+0000",
+            "commit": {
+              "sha": "e69d4eedf1140910068b6de43078ca40e9bf7f86"
+            }
+          },
+          {
+            "name": "release-1.4.0",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-06-18T09:20:52+0000",
+            "commit": {
+              "sha": "b4098ced85064ff0911c7a8ee8cba7b9da146a59"
+            }
+          },
+          {
+            "name": "release-1.3.0",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-04-22T16:24:23+0000",
+            "commit": {
+              "sha": "17be6b2c8e7e64e29c4f23531df893d0f42dbf7b"
+            }
+          },
+          {
+            "name": "release-1.2.1",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-04-07T16:26:20+0000",
+            "commit": {
+              "sha": "70712a30b172b9bb69380c3f598a34decb1befd2"
+            }
+          },
+          {
+            "name": "release-1.2.0",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-04-02T17:42:33+0000",
+            "commit": {
+              "sha": "201fcb3c8652ac4b4dbd46c877a013fcdbb7b7d7"
+            }
+          },
+          {
+            "name": "release-1.1.0",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-03-26T17:10:20+0000",
+            "commit": {
+              "sha": "3b833388aa707e6df685e09118217d02b484baea"
+            }
+          },
+          {
+            "name": "release-module",
+            "isMain": false,
+            "type": "LONG",
+            "analysisDate": "2021-03-18T11:19:51+0000",
+            "commit": {
+              "sha": "0cfb3768a0010fe06d946fd95d8e305a26b44b01"
+            }
+          }
+        ]
+      }
+    },
+    "https://sonarcloud.io/api/measures/component?component=org.folio%3Amod-search&metricKeys=coverage%2Cline_coverage%2Cbranch_coverage%2Clines_to_cover%2Cuncovered_lines%2Cconditions_to_cover%2Cuncovered_conditions%2Cduplicated_lines_density&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "component": {
+          "id": "AaGIIFhad3H2Qnfw5sRX",
+          "key": "org.folio:mod-search",
+          "name": "mod-search",
+          "description": "FOLIO search service",
+          "qualifier": "TRK",
+          "measures": [
+            {
+              "metric": "coverage",
+              "value": "94.6",
+              "bestValue": false
+            },
+            {
+              "metric": "uncovered_conditions",
+              "value": "195",
+              "bestValue": false
+            },
+            {
+              "metric": "duplicated_lines_density",
+              "value": "1.2",
+              "bestValue": false
+            },
+            {
+              "metric": "lines_to_cover",
+              "value": "7663"
+            },
+            {
+              "metric": "branch_coverage",
+              "value": "90.3",
+              "bestValue": false
+            },
+            {
+              "metric": "uncovered_lines",
+              "value": "330",
+              "bestValue": false
+            },
+            {
+              "metric": "line_coverage",
+              "value": "95.7",
+              "bestValue": false
+            },
+            {
+              "metric": "conditions_to_cover",
+              "value": "2012"
+            }
+          ],
+          "branch": "v6.0.11"
+        }
+      }
+    },
+    "https://sonarcloud.io/api/issues/search?componentKeys=org.folio%3Amod-search&issueStatuses=OPEN%2CCONFIRMED&impactSoftwareQualities=SECURITY&ps=100&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "total": 0,
+        "p": 1,
+        "ps": 100,
+        "paging": {
+          "pageIndex": 1,
+          "pageSize": 100,
+          "total": 0
+        },
+        "issues": [],
+        "facets": []
+      }
+    },
+    "https://sonarcloud.io/api/issues/search?componentKeys=org.folio%3Amod-search&issueStatuses=OPEN%2CCONFIRMED&types=VULNERABILITY&ps=1&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "total": 0,
+        "p": 1,
+        "ps": 1,
+        "paging": {
+          "pageIndex": 1,
+          "pageSize": 1,
+          "total": 0
+        },
+        "issues": [],
+        "facets": []
+      }
+    },
+    "https://sonarcloud.io/api/issues/search?componentKeys=org.folio%3Amod-search&issueStatuses=OPEN%2CCONFIRMED&impactSeverities=HIGH%2CBLOCKER&facets=rules&ps=500&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "total": 0,
+        "p": 1,
+        "ps": 500,
+        "paging": {
+          "pageIndex": 1,
+          "pageSize": 500,
+          "total": 0
+        },
+        "issues": [],
+        "facets": [
+          {
+            "property": "rules",
+            "values": []
+          }
+        ]
+      }
+    },
+    "https://sonarcloud.io/api/issues/search?componentKeys=org.folio%3Amod-search&issueStatuses=ACCEPTED%2CFALSE_POSITIVE&facets=issueStatuses&ps=100&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "total": 0,
+        "p": 1,
+        "ps": 100,
+        "paging": {
+          "pageIndex": 1,
+          "pageSize": 100,
+          "total": 0
+        },
+        "issues": [],
+        "facets": [
+          {
+            "property": "issueStatuses",
+            "values": [
+              {
+                "val": "OPEN",
+                "count": 17
+              },
+              {
+                "val": "CONFIRMED",
+                "count": 0
+              },
+              {
+                "val": "FALSE_POSITIVE",
+                "count": 0
+              },
+              {
+                "val": "ACCEPTED",
+                "count": 0
+              },
+              {
+                "val": "FIXED",
+                "count": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "https://sonarcloud.io/api/hotspots/search?projectKey=org.folio%3Amod-search&status=REVIEWED&ps=100&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "paging": {
+          "pageIndex": 1,
+          "pageSize": 100,
+          "total": 0
+        },
+        "hotspots": []
+      }
+    },
+    "https://sonarcloud.io/api/hotspots/search?projectKey=org.folio%3Amod-search&status=TO_REVIEW&ps=100&branch=v6.0.11": {
+      "status": 200,
+      "body": {
+        "paging": {
+          "pageIndex": 1,
+          "pageSize": 100,
+          "total": 0
+        },
+        "hotspots": []
+      }
+    },
+    "https://sonarcloud.io/api/navigation/component?component=org.folio%3Amod-search": {
+      "status": 200,
+      "body": {
+        "key": "org.folio:mod-search",
+        "organization": "folio-org",
+        "organizationName": "folio-org",
+        "id": "AXZRKpsv9jdhW6JjgfcN",
+        "name": "mod-search",
+        "description": "FOLIO search service",
+        "isFavorite": false,
+        "badgeToken": "d190043fbce44a3ab2c4231fe19c1c7cf3a89735",
+        "createdAt": "2020-12-11T10:38:35+0000",
+        "visibility": "public",
+        "version": "6.1.0-SNAPSHOT",
+        "analysisDate": "2026-11-09T09:03:56+0000",
+        "ciName": "Github Actions",
+        "analysisDateAllBranches": "2026-11-13T12:29:31+0000",
+        "qualityProfiles": [
+          {
+            "key": "AV7D9NaMAFLlVksVgrkI",
+            "name": "FOLIO Java Way",
+            "language": "java",
+            "deleted": false
+          },
+          {
+            "key": "AV5b6m-A-ycAxoR9jWYH",
+            "name": "Sonar way comprehensive",
+            "language": "xml",
+            "deleted": false
+          }
+        ],
+        "qualityGate": {
+          "key": 9,
+          "name": "Sonar way",
+          "isDefault": true
+        },
+        "breadcrumbs": [
+          {
+            "key": "org.folio:mod-search",
+            "name": "mod-search",
+            "qualifier": "TRK"
+          }
+        ]
+      }
+    },
+    "https://sonarcloud.io/api/qualityprofiles/search?project=org.folio%3Amod-search&organization=folio-org": {
+      "status": 200,
+      "body": {
+        "profiles": [
+          {
+            "name": "FOLIO Java Way",
+            "language": "java",
+            "isDefault": true
+          },
+          {
+            "name": "Sonar way comprehensive",
+            "language": "xml",
+            "isDefault": true
+          }
+        ]
+      }
+    },
+    "https://sonarcloud.io/api/ce/component?component=org.folio%3Amod-search": {
+      "status": 200,
+      "body": {
+        "queue": [],
+        "current": {
+          "id": "AaHU4uVkDjziRRpEevoz",
+          "type": "REPORT",
+          "componentId": "AaHU4ner6UajzvOFgaPY",
+          "componentKey": "org.folio:mod-search",
+          "componentName": "mod-search",
+          "componentQualifier": "TRK",
+          "analysisId": "05981eed-6428-476a-880c-755bbeb03822",
+          "status": "SUCCESS",
+          "submittedAt": "2026-11-13T12:30:02+0000",
+          "submitterLogin": "ankitasen-ubmainz@github",
+          "startedAt": "2026-11-13T12:30:02+0000",
+          "executedAt": "2026-11-13T12:30:04+0000",
+          "executionTimeMs": 1907,
+          "logs": false,
+          "hasScannerContext": true,
+          "organization": "folio-org",
+          "pullRequest": "1023",
+          "warningCount": 0,
+          "warnings": []
+        }
+      }
+    }
+  }
+}
